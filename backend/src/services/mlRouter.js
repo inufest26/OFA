@@ -1,0 +1,179 @@
+/**
+ * ML Routing Engine — Pluggable Interface
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * INTEGRATION GUIDE FOR REAL ML MODEL
+ * ───────────────────────────────────────────────────────────────────────────
+ * Replace the `_placeholderPredict` method with your actual model call.
+ *
+ * INPUT  → buildFeatures(transaction, acquirerMetrics) returns:
+ * {
+ *   cardBin:          string,   // first 6 digits of card number
+ *   cardType:         string,   // 'visa' | 'mastercard' | 'troy'
+ *   amount:           number,   // TRY
+ *   currency:         string,
+ *   hour:             number,   // 0-23
+ *   dayOfWeek:        number,   // 0 (Sun) – 6 (Sat)
+ *   isWeekend:        boolean,
+ *   acquirerMetrics: {
+ *     [acquirerId]: {
+ *       successRate:       number,  // last 1 hour
+ *       avgResponseTime:   number,  // ms
+ *       transactionCount:  number,
+ *       errorRate:         number,
+ *     }
+ *   }
+ * }
+ *
+ * OUTPUT ← your model must return:
+ * {
+ *   scores: { [acquirerId]: number },   // 0..1 probability scores
+ *   selectedAcquirer: string,           // highest-scored acquirer id
+ *   confidence: number,                 // score of selected acquirer
+ * }
+ *
+ * Integration options:
+ *   A) ONNX.js    → load .onnx file, call session.run(inputTensor)
+ *   B) TF.js      → tf.loadLayersModel(), model.predict(tensor)
+ *   C) HTTP       → POST to external model server, await response
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+
+const { getAllAcquirers, getRankedAcquirers } = require('./acquirerSimulator');
+const logger = require('../utils/logger');
+
+class MLRouter {
+  constructor() {
+    this.useRealModel = false; // flip to true when real model is attached
+  }
+
+  /**
+   * Main entry point.
+   * @param {object} transaction - { cardNumber, cardType, amount, currency }
+   * @returns {{ scores, selectedAcquirer, confidence, features, method }}
+   */
+  async predict(transaction) {
+    const acquirerMetrics = this._buildAcquirerMetrics();
+    const features = this._buildFeatures(transaction, acquirerMetrics);
+
+    let result;
+    if (this.useRealModel) {
+      result = await this._realModelPredict(features);
+    } else {
+      result = this._placeholderPredict(features, acquirerMetrics);
+    }
+
+    logger.info('ML routing decision', {
+      selectedAcquirer: result.selectedAcquirer,
+      confidence: result.confidence.toFixed(3),
+      method: result.method,
+    });
+
+    return { ...result, features };
+  }
+
+  // ── Feature builder ─────────────────────────────────────────────────────────
+
+  _buildFeatures(transaction, acquirerMetrics) {
+    const now = new Date();
+    const cardNumber = (transaction.cardNumber || '').replace(/\s/g, '');
+    return {
+      cardBin: cardNumber.slice(0, 6),
+      cardType: transaction.cardType || 'visa',
+      amount: transaction.amount || 0,
+      currency: transaction.currency || 'TRY',
+      hour: now.getHours(),
+      dayOfWeek: now.getDay(),
+      isWeekend: now.getDay() === 0 || now.getDay() === 6,
+      acquirerMetrics,
+    };
+  }
+
+  _buildAcquirerMetrics() {
+    const acquirers = getAllAcquirers();
+    const metrics = {};
+    for (const a of acquirers) {
+      metrics[a.id] = {
+        successRate: a.currentSuccessRate,
+        avgResponseTime: a.avgResponseTime,
+        transactionCount: a.totalTransactions,
+        errorRate: 1 - a.currentSuccessRate,
+      };
+    }
+    return metrics;
+  }
+
+  // ── Placeholder heuristic ───────────────────────────────────────────────────
+  // Score formula:
+  //   successRate × 0.50
+  //   + (1 − normalizedResponseTime) × 0.20
+  //   + cardTypeAffinity × 0.15
+  //   + timeSlotBonus × 0.15
+
+  _placeholderPredict(features, acquirerMetrics) {
+    const activeAcquirers = getRankedAcquirers().filter((a) => a.isActive);
+
+    if (activeAcquirers.length === 0) {
+      return { scores: {}, selectedAcquirer: null, confidence: 0, method: 'placeholder' };
+    }
+
+    // Normalize response times
+    const times = activeAcquirers.map((a) => acquirerMetrics[a.id]?.avgResponseTime || 300);
+    const maxTime = Math.max(...times);
+    const minTime = Math.min(...times);
+    const timeRange = maxTime - minTime || 1;
+
+    // Card-type affinity per acquirer (demo values)
+    const cardAffinity = {
+      acquirer_garanti:   { visa: 0.9, mastercard: 0.85, troy: 0.7 },
+      acquirer_yapikredi: { visa: 0.8, mastercard: 0.9,  troy: 0.75 },
+      acquirer_isbank:    { visa: 0.75, mastercard: 0.8, troy: 0.95 },
+    };
+
+    // Time-of-day bonus (peak hours 9-18 = higher traffic = lower bonus)
+    const isPeak = features.hour >= 9 && features.hour < 18;
+    const timeBonus = isPeak ? 0.5 : 0.8;
+
+    const scores = {};
+    for (const acq of activeAcquirers) {
+      const m = acquirerMetrics[acq.id] || {};
+      const successScore = (m.successRate || acq.currentSuccessRate) * 0.50;
+      const normTime = (maxTime - (m.avgResponseTime || 300)) / timeRange;
+      const respScore = normTime * 0.20;
+      const affinity = cardAffinity[acq.id]?.[features.cardType] ?? 0.8;
+      const affinityScore = affinity * 0.15;
+      const slotScore = timeBonus * 0.15;
+      scores[acq.id] = parseFloat(
+        (successScore + respScore + affinityScore + slotScore).toFixed(4)
+      );
+    }
+
+    // Pick winner
+    const selectedAcquirer = Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0];
+
+    return {
+      scores,
+      selectedAcquirer,
+      confidence: scores[selectedAcquirer],
+      method: 'placeholder-heuristic',
+    };
+  }
+
+  // ── Real model stub ─────────────────────────────────────────────────────────
+  // Replace this implementation when the real model is ready.
+
+  // eslint-disable-next-line no-unused-vars
+  async _realModelPredict(features) {
+    // Example: call an external model server
+    // const response = await fetch('http://model-server/predict', {
+    //   method: 'POST',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify(features),
+    // });
+    // const data = await response.json();
+    // return { scores: data.scores, selectedAcquirer: data.selected, confidence: data.confidence, method: 'real-model' };
+    throw new Error('Real model not implemented. Set useRealModel=false to use placeholder.');
+  }
+}
+
+module.exports = new MLRouter();
