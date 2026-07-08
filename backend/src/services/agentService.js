@@ -35,8 +35,34 @@ async function retryWithBackoff(fn, maxRetries = 4) {
   }
 }
 
-// Preferred model with fallback
-const GEMINI_MODEL = config.geminiModel || 'gemini-1.5-flash-latest';
+// Preferred model
+const GEMINI_MODEL = config.geminiModel || 'gemini-2.0-flash-lite';
+
+// ── Safe content extraction helper ──────────────────────────────────────────
+function extractText(response) {
+  try {
+    const parts = response?.candidates?.[0]?.content?.parts;
+    if (!parts || parts.length === 0) return null;
+    return parts.filter((p) => p.text).map((p) => p.text).join('') || null;
+  } catch (_) { return null; }
+}
+
+function extractToolCalls(response) {
+  try {
+    const parts = response?.candidates?.[0]?.content?.parts;
+    if (!parts || parts.length === 0) return [];
+    return parts.filter((p) => p.functionCall);
+  } catch (_) { return []; }
+}
+
+function isErrorResponse(err) {
+  const msg = String(err?.message || '');
+  return {
+    is429: msg.includes('429') || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('rate limit'),
+    isEmpty: msg.toLowerCase().includes('must contain either output text or tool calls') || msg.toLowerCase().includes('cannot both be empty'),
+    is404: msg.includes('404') || msg.includes('not found'),
+  };
+}
 
 // ── Tool declarations ─────────────────────────────────────────────────────────
 
@@ -303,48 +329,93 @@ Please investigate, take appropriate corrective actions, and create an incident 
   }
 }
 
-// ── Admin chat ────────────────────────────────────────────────────────────────
+// ── Admin chat ──────────────────────────────────────────────────────────────────────────────
 
 async function askAgent(question) {
   try {
-    const model = genAI.getGenerativeModel({
+    // ── Phase 1: collect real-time context via tool calls ─────────────────────
+    const modelWithTools = genAI.getGenerativeModel({
       model: GEMINI_MODEL,
       tools: [{ functionDeclarations: agentToolDeclarations }],
       systemInstruction: `You are SmartPay Agent, an AI monitoring assistant for a payment gateway.
 Answer admin questions about system status, incidents, metrics, and acquirer health.
-Use the provided tools to fetch real-time data before answering. Be concise and actionable.`,
+Always call at least one tool to get real-time data before answering. Be concise and actionable.
+Respond in the same language as the user question.`,
     });
 
-    const chat = model.startChat();
+    const chat = modelWithTools.startChat();
     let response = await retryWithBackoff(() => chat.sendMessage(question));
+    let collectedContext = [];
+    let lastText = null;
     let iteration = 0;
 
     while (iteration < 6) {
       iteration++;
-      const content = response.candidates?.[0]?.content;
-      if (!content) break;
-      const toolCalls = content.parts?.filter((p) => p.functionCall) || [];
+
+      // Check for finish reason STOP or empty — model is done
+      const finishReason = response?.candidates?.[0]?.finishReason;
+      const toolCalls = extractToolCalls(response);
+      const text = extractText(response);
+
+      if (text) lastText = text;
+
+      // No tool calls — model gave its final answer
       if (toolCalls.length === 0) {
-        return content.parts?.map((p) => p.text || '').join('') || 'Yanıt üretilemedi.';
+        if (text) return text;
+        // Model returned nothing — use whatever we collected
+        break;
       }
 
+      // Execute each tool call
       const toolResults = [];
       for (const part of toolCalls) {
         const { name, args } = part.functionCall;
-        const result = await dispatchTool(name, args, {});
-        toolResults.push({ functionResponse: { name, response: { result } } });
+        try {
+          const result = await dispatchTool(name, args, {});
+          collectedContext.push({ tool: name, result });
+          toolResults.push({ functionResponse: { name, response: { result } } });
+        } catch (toolErr) {
+          toolResults.push({ functionResponse: { name, response: { error: toolErr.message } } });
+        }
       }
+
+      // Guard: only send if we have results
+      if (toolResults.length === 0) break;
+
       response = await retryWithBackoff(() => chat.sendMessage(toolResults));
     }
-    return 'Agent yanıt oluşturamadı.';
+
+    // If we have collected text from any turn, return it
+    if (lastText) return lastText;
+
+    // ── Phase 2: Fallback — summarise context without tool loop ─────────────────
+    if (collectedContext.length > 0) {
+      const summaryModel = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+      const contextStr = collectedContext.map((c) => `[${c.tool}]: ${JSON.stringify(c.result)}`).join('\n');
+      const summaryPrompt = `Given this system data:\n${contextStr}\n\nAnswer this question: ${question}`;
+      const summaryResp = await retryWithBackoff(() => summaryModel.generateContent(summaryPrompt));
+      const summaryText = extractText(summaryResp);
+      if (summaryText) return summaryText;
+    }
+
+    return 'Agent şu anda yanıt üretemedi. Lütfen tekrar deneyin.';
+
   } catch (err) {
-    const is429 = String(err?.message).includes('429') || String(err?.message).toLowerCase().includes('quota');
-    if (is429) {
-      logger.warn('Gemini API rate limit reached on askAgent', { error: err.message });
-      return '⚠️ Gemini API rate limit aşıldı. Lütfen birkaç saniye bekleyip tekrar deneyin. (Ücretsiz Gemini API planı dakikada 15 istek ile sınırlıdır.)';
+    const errInfo = isErrorResponse(err);
+    if (errInfo.is429) {
+      logger.warn('Gemini rate limit on askAgent', { error: err.message });
+      return '⚠️ API kota limiti aşıldı. Lütfen 30-60 saniye bekleyip tekrar deneyin.';
+    }
+    if (errInfo.isEmpty) {
+      logger.warn('Gemini empty response on askAgent', { error: err.message });
+      return '⚠️ Model boş yanıt döndürdü. Lütfen sorunuzu yeniden ifade edip tekrar deneyin.';
+    }
+    if (errInfo.is404) {
+      logger.error('Gemini model not found', { model: GEMINI_MODEL, error: err.message });
+      return `⚠️ Model bulunamadı: ${GEMINI_MODEL}. .env dosyasındaki GEMINI_MODEL değerini kontrol edin.`;
     }
     logger.error('askAgent error', { error: err.message });
-    throw err;
+    return `⚠️ Hata: ${err.message}`;
   }
 }
 
