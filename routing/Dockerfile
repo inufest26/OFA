@@ -7,5 +7,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Once veri uret, sonra modeli egit.
-CMD ["sh", "-c", "python data_generator.py && python train_model.py"]
+# Port
+EXPOSE 5050
+
+# Model dosyası volume'dan geliyorsa eğitimi atla, yoksa eğit.
+# serve.py startup'ta ensure_model() çağırır.
+CMD ["python", "serve.py"]

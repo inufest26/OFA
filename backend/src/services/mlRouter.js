@@ -44,7 +44,7 @@ const logger = require('../utils/logger');
 
 class MLRouter {
   constructor() {
-    this.useRealModel = false; // flip to true when real model is attached
+    this.useRealModel = true; // flip to true when real model is attached
   }
 
   /**
@@ -160,19 +160,48 @@ class MLRouter {
   }
 
   // ── Real model stub ─────────────────────────────────────────────────────────
-  // Replace this implementation when the real model is ready.
+  // Calls the FastAPI routing service.
 
-  // eslint-disable-next-line no-unused-vars
   async _realModelPredict(features) {
-    // Example: call an external model server
-    // const response = await fetch('http://model-server/predict', {
-    //   method: 'POST',
-    //   headers: { 'Content-Type': 'application/json' },
-    //   body: JSON.stringify(features),
-    // });
-    // const data = await response.json();
-    // return { scores: data.scores, selectedAcquirer: data.selected, confidence: data.confidence, method: 'real-model' };
-    throw new Error('Real model not implemented. Set useRealModel=false to use placeholder.');
+    const activeAcquirers = getRankedAcquirers().filter((a) => a.isActive).map((a) => a.id);
+    if (activeAcquirers.length === 0) {
+      return { scores: {}, selectedAcquirer: null, confidence: 0, method: 'real-model-no-active' };
+    }
+
+    const payload = {
+      acquirer_ids: activeAcquirers,
+      card_type: features.cardType,
+      amount: features.amount,
+      hour_of_day: features.hour,
+      day_of_week: features.dayOfWeek,
+      is_retry: 0, // In a real system this would track retries
+      issuer_id: "I01", // Placeholder issuer
+    };
+
+    try {
+      const routingUrl = process.env.ROUTING_URL || 'http://routing:5050/predict';
+      const response = await fetch(routingUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Routing service returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      return {
+        scores: data.scores,
+        selectedAcquirer: data.selected_acquirer,
+        confidence: data.confidence,
+        method: data.method || 'ml-random-forest',
+      };
+    } catch (err) {
+      logger.error('Real model predict failed, falling back to heuristic', { error: err.message });
+      // Fallback
+      return this._placeholderPredict(features, features.acquirerMetrics);
+    }
   }
 }
 
