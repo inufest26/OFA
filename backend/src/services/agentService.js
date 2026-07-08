@@ -47,20 +47,59 @@ function extractText(response) {
   } catch (_) { return null; }
 }
 
-function extractToolCalls(response) {
-  try {
-    const parts = response?.candidates?.[0]?.content?.parts;
-    if (!parts || parts.length === 0) return [];
-    return parts.filter((p) => p.functionCall);
-  } catch (_) { return []; }
-}
-
 function isErrorResponse(err) {
   const msg = String(err?.message || '');
   return {
     is429: msg.includes('429') || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('rate limit'),
     isEmpty: msg.toLowerCase().includes('must contain either output text or tool calls') || msg.toLowerCase().includes('cannot both be empty'),
     is404: msg.includes('404') || msg.includes('not found'),
+  };
+}
+
+// ── Pre-fetch system context locally (no API calls) ──────────────────────────
+async function buildSystemContext() {
+  const db = getDb();
+  const acquirers = getAllAcquirers();
+
+  // Recent metrics (last 30 min)
+  const since30m = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const recentTx = await db.all(
+    'SELECT acquirer_id, status, error_code, response_time_ms FROM transactions WHERE created_at >= ? LIMIT 200',
+    since30m
+  );
+
+  const txSummary = {};
+  for (const tx of recentTx) {
+    if (!txSummary[tx.acquirer_id]) txSummary[tx.acquirer_id] = { total: 0, success: 0, errors: {} };
+    txSummary[tx.acquirer_id].total += 1;
+    if (tx.status === 'success') txSummary[tx.acquirer_id].success += 1;
+    if (tx.error_code) {
+      txSummary[tx.acquirer_id].errors[tx.error_code] =
+        (txSummary[tx.acquirer_id].errors[tx.error_code] || 0) + 1;
+    }
+  }
+
+  // Overall stats
+  const { c: totalTx }   = await db.get('SELECT COUNT(*) AS c FROM transactions');
+  const { c: successTx } = await db.get("SELECT COUNT(*) AS c FROM transactions WHERE status='success'");
+  const { c: openInc }   = await db.get("SELECT COUNT(*) AS c FROM incidents WHERE status='open'");
+  const { c: openEsc }   = await db.get('SELECT COUNT(*) AS c FROM escalations WHERE acknowledged=0');
+
+  // Recent incidents
+  const incidents = await db.all(
+    "SELECT title, severity, status, acquirer_id, created_at FROM incidents ORDER BY created_at DESC LIMIT 5"
+  );
+
+  return {
+    timestamp: new Date().toISOString(),
+    overallStats: { totalTransactions: totalTx, successRate: totalTx > 0 ? (successTx / totalTx).toFixed(3) : 'N/A', openIncidents: openInc, openEscalations: openEsc },
+    acquirers: acquirers.map((a) => ({
+      id: a.id, name: a.name, isActive: a.isActive, anomalyMode: a.anomalyMode,
+      currentSuccessRate: a.currentSuccessRate.toFixed(3), avgResponseTime: a.avgResponseTime.toFixed(0) + 'ms',
+      routingWeight: a.routingWeight, consecutiveFailures: a.consecutiveFailures,
+    })),
+    last30minTxByAcquirer: txSummary,
+    recentIncidents: incidents,
   };
 }
 
@@ -329,74 +368,59 @@ Please investigate, take appropriate corrective actions, and create an incident 
   }
 }
 
-// ── Admin chat ──────────────────────────────────────────────────────────────────────────────
+// ── Admin chat — Context Injection Pattern (1 API call per question) ─────────
+// Instead of multi-round tool calling, we pre-fetch all data locally from
+// the database and in-memory state, then send ONE generateContent request.
 
 async function askAgent(question) {
   try {
-    // ── Phase 1: collect real-time context via tool calls ─────────────────────
-    const modelWithTools = genAI.getGenerativeModel({
-      model: GEMINI_MODEL,
-      tools: [{ functionDeclarations: agentToolDeclarations }],
-      systemInstruction: `You are SmartPay Agent, an AI monitoring assistant for a payment gateway.
-Answer admin questions about system status, incidents, metrics, and acquirer health.
-Always call at least one tool to get real-time data before answering. Be concise and actionable.
-Respond in the same language as the user question.`,
-    });
+    // 1. Collect real-time context locally — zero API calls
+    const ctx = await buildSystemContext();
 
-    const chat = modelWithTools.startChat();
-    let response = await retryWithBackoff(() => chat.sendMessage(question));
-    let collectedContext = [];
-    let lastText = null;
-    let iteration = 0;
+    // 2. Build a rich, structured prompt
+    const systemPrompt = `You are SmartPay Agent, an AI monitoring assistant for a payment gateway system.
+You will be given real-time system data and must answer the admin's question based on that data.
+Be concise, factual, and actionable. Respond in the same language as the question (Turkish or English).
+If you see anomalies or issues in the data, proactively highlight them.`;
 
-    while (iteration < 6) {
-      iteration++;
+    const userPrompt = `=== REAL-TIME SYSTEM SNAPSHOT (${ctx.timestamp}) ===
 
-      // Check for finish reason STOP or empty — model is done
-      const finishReason = response?.candidates?.[0]?.finishReason;
-      const toolCalls = extractToolCalls(response);
-      const text = extractText(response);
+OVERALL STATS:
+${JSON.stringify(ctx.overallStats, null, 2)}
 
-      if (text) lastText = text;
+ACQUIRER HEALTH:
+${ctx.acquirers.map((a) => `- ${a.name} [${a.id}]:
+  Active: ${a.isActive}, Anomaly: ${a.anomalyMode}
+  Success Rate: ${(parseFloat(a.currentSuccessRate) * 100).toFixed(1)}%
+  Avg Response: ${a.avgResponseTime}
+  Routing Weight: ${a.routingWeight}x
+  Consecutive Failures: ${a.consecutiveFailures}`).join('\n')}
 
-      // No tool calls — model gave its final answer
-      if (toolCalls.length === 0) {
-        if (text) return text;
-        // Model returned nothing — use whatever we collected
-        break;
-      }
+LAST 30 MIN TRANSACTIONS BY ACQUIRER:
+${Object.entries(ctx.last30minTxByAcquirer).length > 0
+  ? Object.entries(ctx.last30minTxByAcquirer).map(([id, s]) =>
+    `- ${id}: ${s.total} total, ${s.success} success (${s.total > 0 ? ((s.success/s.total)*100).toFixed(1) : 0}%), errors: ${JSON.stringify(s.errors)}`
+  ).join('\n')
+  : '(no transactions in last 30 minutes)'}
 
-      // Execute each tool call
-      const toolResults = [];
-      for (const part of toolCalls) {
-        const { name, args } = part.functionCall;
-        try {
-          const result = await dispatchTool(name, args, {});
-          collectedContext.push({ tool: name, result });
-          toolResults.push({ functionResponse: { name, response: { result } } });
-        } catch (toolErr) {
-          toolResults.push({ functionResponse: { name, response: { error: toolErr.message } } });
-        }
-      }
+RECENT INCIDENTS:
+${ctx.recentIncidents.length > 0
+  ? ctx.recentIncidents.map((i) => `- [${i.severity}] ${i.title} — ${i.status} (${i.acquirer_id})`).join('\n')
+  : '(none)'}
 
-      // Guard: only send if we have results
-      if (toolResults.length === 0) break;
+=== ADMIN QUESTION ===
+${question}`;
 
-      response = await retryWithBackoff(() => chat.sendMessage(toolResults));
-    }
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const response = await retryWithBackoff(() =>
+      model.generateContent([
+        { text: systemPrompt },
+        { text: userPrompt },
+      ])
+    );
 
-    // If we have collected text from any turn, return it
-    if (lastText) return lastText;
-
-    // ── Phase 2: Fallback — summarise context without tool loop ─────────────────
-    if (collectedContext.length > 0) {
-      const summaryModel = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-      const contextStr = collectedContext.map((c) => `[${c.tool}]: ${JSON.stringify(c.result)}`).join('\n');
-      const summaryPrompt = `Given this system data:\n${contextStr}\n\nAnswer this question: ${question}`;
-      const summaryResp = await retryWithBackoff(() => summaryModel.generateContent(summaryPrompt));
-      const summaryText = extractText(summaryResp);
-      if (summaryText) return summaryText;
-    }
+    const text = extractText(response);
+    if (text) return text;
 
     return 'Agent şu anda yanıt üretemedi. Lütfen tekrar deneyin.';
 
