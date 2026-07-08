@@ -57,6 +57,11 @@ setInterval(() => {
       const driftTime = (Math.random() * 60) - 30; // -30ms to +30ms
       acq.avgResponseTime = Math.min(1000, Math.max(100, acq.avgResponseTime + driftTime));
     }
+    
+    // Naturally decay currentSuccessRate towards baseSuccessRate so UI moves without traffic
+    acq.currentSuccessRate = acq.currentSuccessRate * 0.8 + acq.baseSuccessRate * 0.2;
+    
+    persistState(acq).catch(() => {});
   }
 }, 30000); // Every 30 seconds
 
