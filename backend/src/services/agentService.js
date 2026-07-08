@@ -19,6 +19,25 @@ function setSocketIo(io) { _io = io; }
 const activeInvestigations = new Set();
 const genAI = new GoogleGenerativeAI(config.geminiApiKey);
 
+// ── Exponential backoff for Gemini 429 rate-limit errors ──────────────────────
+async function retryWithBackoff(fn, maxRetries = 4) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const status = err?.status || err?.response?.status || err?.code;
+      const is429 = status === 429 || String(err?.message).includes('429') || String(err?.message).toLowerCase().includes('quota') || String(err?.message).toLowerCase().includes('rate');
+      if (!is429 || attempt === maxRetries) throw err;
+      const delay = Math.min(2000 * Math.pow(2, attempt), 30000); // 2s, 4s, 8s, 16s
+      logger.warn(`Gemini 429 rate limit — retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
+
+// Preferred model with fallback
+const GEMINI_MODEL = config.geminiModel || 'gemini-1.5-flash-latest';
+
 // ── Tool declarations ─────────────────────────────────────────────────────────
 
 const agentToolDeclarations = [
@@ -213,7 +232,7 @@ async function investigate(acquirerId, anomalies, metrics) {
 
   try {
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.0-flash',
+      model: GEMINI_MODEL,
       tools: [{ functionDeclarations: agentToolDeclarations }],
       systemInstruction: `You are SmartPay Agent, an autonomous AI monitoring system for a payment gateway.
 You have detected anomalies in the payment acquirer system and must investigate and resolve them.
@@ -243,7 +262,7 @@ Current metrics (last 5 minutes):
 Please investigate, take appropriate corrective actions, and create an incident report.`;
 
     const chat = model.startChat();
-    let response = await chat.sendMessage(initialPrompt);
+    let response = await retryWithBackoff(() => chat.sendMessage(initialPrompt));
     let iteration = 0;
 
     while (iteration < 12) {
@@ -268,7 +287,7 @@ Please investigate, take appropriate corrective actions, and create an incident 
         toolResults.push({ functionResponse: { name, response: { result } } });
       }
 
-      response = await chat.sendMessage(toolResults);
+      response = await retryWithBackoff(() => chat.sendMessage(toolResults));
     }
 
     await db.run(
@@ -287,34 +306,46 @@ Please investigate, take appropriate corrective actions, and create an incident 
 // ── Admin chat ────────────────────────────────────────────────────────────────
 
 async function askAgent(question) {
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash',
-    tools: [{ functionDeclarations: agentToolDeclarations }],
-    systemInstruction: `You are SmartPay Agent, an AI monitoring assistant for a payment gateway.
+  try {
+    const model = genAI.getGenerativeModel({
+      model: GEMINI_MODEL,
+      tools: [{ functionDeclarations: agentToolDeclarations }],
+      systemInstruction: `You are SmartPay Agent, an AI monitoring assistant for a payment gateway.
 Answer admin questions about system status, incidents, metrics, and acquirer health.
 Use the provided tools to fetch real-time data before answering. Be concise and actionable.`,
-  });
+    });
 
-  const chat = model.startChat();
-  let response = await chat.sendMessage(question);
-  let iteration = 0;
+    const chat = model.startChat();
+    let response = await retryWithBackoff(() => chat.sendMessage(question));
+    let iteration = 0;
 
-  while (iteration < 6) {
-    iteration++;
-    const content = response.candidates?.[0]?.content;
-    if (!content) break;
-    const toolCalls = content.parts?.filter((p) => p.functionCall) || [];
-    if (toolCalls.length === 0) return content.parts?.map((p) => p.text || '').join('') || 'No response generated.';
+    while (iteration < 6) {
+      iteration++;
+      const content = response.candidates?.[0]?.content;
+      if (!content) break;
+      const toolCalls = content.parts?.filter((p) => p.functionCall) || [];
+      if (toolCalls.length === 0) {
+        return content.parts?.map((p) => p.text || '').join('') || 'Yanıt üretilemedi.';
+      }
 
-    const toolResults = [];
-    for (const part of toolCalls) {
-      const { name, args } = part.functionCall;
-      const result = await dispatchTool(name, args, {});
-      toolResults.push({ functionResponse: { name, response: { result } } });
+      const toolResults = [];
+      for (const part of toolCalls) {
+        const { name, args } = part.functionCall;
+        const result = await dispatchTool(name, args, {});
+        toolResults.push({ functionResponse: { name, response: { result } } });
+      }
+      response = await retryWithBackoff(() => chat.sendMessage(toolResults));
     }
-    response = await chat.sendMessage(toolResults);
+    return 'Agent yanıt oluşturamadı.';
+  } catch (err) {
+    const is429 = String(err?.message).includes('429') || String(err?.message).toLowerCase().includes('quota');
+    if (is429) {
+      logger.warn('Gemini API rate limit reached on askAgent', { error: err.message });
+      return '⚠️ Gemini API rate limit aşıldı. Lütfen birkaç saniye bekleyip tekrar deneyin. (Ücretsiz Gemini API planı dakikada 15 istek ile sınırlıdır.)';
+    }
+    logger.error('askAgent error', { error: err.message });
+    throw err;
   }
-  return 'Agent could not generate a response.';
 }
 
 module.exports = { investigate, askAgent, setSocketIo };

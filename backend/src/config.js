@@ -3,6 +3,7 @@ require('dotenv').config();
 module.exports = {
   port: parseInt(process.env.BACKEND_PORT || '4000', 10),
   geminiApiKey: process.env.GEMINI_API_KEY || '',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash-latest',
   jwtSecret: process.env.JWT_SECRET || 'fallback-dev-secret',
   adminUsername: process.env.ADMIN_USERNAME || 'admin',
   adminPassword: process.env.ADMIN_PASSWORD || 'admin',
