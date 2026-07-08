@@ -19,17 +19,22 @@ function setSocketIo(io) { _io = io; }
 const activeInvestigations = new Set();
 const genAI = new GoogleGenerativeAI(config.geminiApiKey);
 
-// ── Exponential backoff for Gemini 429 rate-limit errors ──────────────────────
-async function retryWithBackoff(fn, maxRetries = 4) {
+// ── Exponential backoff for Gemini 429 AND empty-response errors ───────────────
+async function retryWithBackoff(fn, maxRetries = 3) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (err) {
+      const msg = String(err?.message || '');
       const status = err?.status || err?.response?.status || err?.code;
-      const is429 = status === 429 || String(err?.message).includes('429') || String(err?.message).toLowerCase().includes('quota') || String(err?.message).toLowerCase().includes('rate');
-      if (!is429 || attempt === maxRetries) throw err;
-      const delay = Math.min(2000 * Math.pow(2, attempt), 30000); // 2s, 4s, 8s, 16s
-      logger.warn(`Gemini 429 rate limit — retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+      const is429 = status === 429 || msg.includes('429') || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('rate limit');
+      const isEmpty = msg.toLowerCase().includes('must contain either output text') || msg.toLowerCase().includes('cannot both be empty');
+      const shouldRetry = is429 || isEmpty;
+      if (!shouldRetry || attempt === maxRetries) throw err;
+      const delay = is429
+        ? Math.min(2000 * Math.pow(2, attempt), 30000)  // 2s, 4s, 8s for quota
+        : Math.min(500 * (attempt + 1), 3000);            // 0.5s, 1s, 1.5s for empty
+      logger.warn(`Gemini ${is429 ? '429' : 'empty-response'} — retry ${attempt + 1}/${maxRetries} in ${delay}ms`);
       await new Promise((r) => setTimeout(r, delay));
     }
   }
@@ -64,7 +69,7 @@ async function buildSystemContext() {
   // Recent metrics (last 30 min)
   const since30m = new Date(Date.now() - 30 * 60 * 1000).toISOString();
   const recentTx = await db.all(
-    'SELECT acquirer_id, status, error_code, response_time_ms FROM transactions WHERE created_at >= ? LIMIT 200',
+    'SELECT acquirer_id, status, error_code FROM transactions WHERE created_at >= ? LIMIT 50',
     since30m
   );
 
@@ -412,12 +417,9 @@ ${ctx.recentIncidents.length > 0
 ${question}`;
 
     const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-    const response = await retryWithBackoff(() =>
-      model.generateContent([
-        { text: systemPrompt },
-        { text: userPrompt },
-      ])
-    );
+    // Single concatenated string — avoid array format which can trigger empty-response SDK errors
+    const fullPrompt = systemPrompt + '\n\n' + userPrompt;
+    const response = await retryWithBackoff(() => model.generateContent(fullPrompt));
 
     const text = extractText(response);
     if (text) return text;
