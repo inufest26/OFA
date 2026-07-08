@@ -44,12 +44,17 @@ async function retryWithBackoff(fn, maxRetries = 3) {
 const GEMINI_MODEL = config.geminiModel || 'gemini-2.0-flash-lite';
 
 // ── Safe content extraction helper ──────────────────────────────────────────
-function extractText(response) {
+function extractText(result) {
   try {
-    const parts = response?.candidates?.[0]?.content?.parts;
+    const resp = result?.response || result;
+    if (resp && typeof resp.text === 'function') return resp.text();
+    const parts = resp?.candidates?.[0]?.content?.parts;
     if (!parts || parts.length === 0) return null;
     return parts.filter((p) => p.text).map((p) => p.text).join('') || null;
-  } catch (_) { return null; }
+  } catch (e) {
+    logger.error('Failed to extract text from model response', { error: e.message });
+    return null;
+  }
 }
 
 function isErrorResponse(err) {
