@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { getIncidents, getIncident, askAgent, acknowledgeIncident } from '../services/api';
+import { getIncidents, getIncident, askAgent, acknowledgeIncident, triggerDemo } from '../services/api';
 import { getSocket } from '../services/socket';
 
 const ACQUIRER_NAMES = {
@@ -74,13 +74,25 @@ export default function Agent() {
     }
   }
 
+  async function handleTriggerDemo() {
+    try {
+      await triggerDemo();
+      // Anomaly trigger successful, waiting for socket event to refresh incidents
+    } catch (err) {
+      console.error('Failed to trigger demo', err);
+    }
+  }
+
   return (
     <div className="admin-main" style={{ padding: '24px 32px' }}>
-      <div className="page-header" style={{ marginBottom: 16 }}>
+      <div className="page-header" style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1>Agent AI İzleme & Chat</h1>
           <p>Otonom sistem kararları ve AI asistan</p>
         </div>
+        <button className="btn btn-primary" onClick={handleTriggerDemo} style={{ backgroundColor: '#ff9800', color: 'white', border: 'none', padding: '10px 16px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
+          ✨ Demo Tetikle (Yapay Zeka Analizi)
+        </button>
       </div>
 
       <div className="agent-layout">

@@ -37,5 +37,6 @@ export const acknowledgeIncident = (id)=> api.post(`/api/agent/incidents/${id}/a
 export const getEscalations      = (p) => api.get('/api/agent/escalations', { params: p }).then((r) => r.data);
 export const acknowledgeEscalation=(id)=> api.post(`/api/agent/escalations/${id}/acknowledge`).then((r) => r.data);
 export const askAgent            = (q) => api.post('/api/agent/ask', { question: q }).then((r) => r.data);
+export const triggerDemo         = ()  => api.post('/api/agent/trigger').then((r) => r.data);
 
 export default api;

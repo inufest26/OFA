@@ -13,6 +13,16 @@ router.post('/ask', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+router.post('/trigger', authMiddleware, async (req, res, next) => {
+  try {
+    const { investigate } = require('../services/agentService');
+    const anomalies = [{ type: 'manual_trigger', detail: 'Demo amaçlı manuel tetikleme (Yapay Zeka Analizi)' }];
+    const fakeMetrics = { successRate: 0.1, total: 10, errors: { 'ACQUIRER_ERROR': 9 } };
+    investigate('acquirer_yapikredi', anomalies, fakeMetrics).catch(err => console.error(err));
+    res.json({ success: true, message: 'Agentic AI analysis triggered' });
+  } catch (err) { next(err); }
+});
+
 router.get('/incidents', authMiddleware, async (req, res, next) => {
   try {
     const db = getDb();
