@@ -191,6 +191,14 @@ const agentToolDeclarations = [
       recommendation:    { type: 'STRING', description: 'What the agent recommends admin to do' },
     }, required: ['title', 'severity', 'description', 'attempted_actions', 'recommendation'] },
   },
+  {
+    name: 'conclude_investigation',
+    description: 'Call this tool ONLY when you have finished all your tasks (gathered data, taken action, escalated or resolved) to conclude the investigation.',
+    parameters: { type: 'OBJECT', properties: {
+      final_conclusion: { type: 'STRING', description: 'Your final summary and reasoning' },
+      resolution_status: { type: 'STRING', description: 'Must be either "resolved" or "escalated"' }
+    }, required: ['final_conclusion', 'resolution_status'] },
+  }
 ];
 
 // ── Tool implementations ──────────────────────────────────────────────────────
@@ -309,6 +317,7 @@ async function investigate(acquirerId, anomalies, metrics) {
     const model = genAI.getGenerativeModel({
       model: GEMINI_MODEL,
       tools: [{ functionDeclarations: agentToolDeclarations }],
+      toolConfig: { functionCallingConfig: { mode: "ANY" } },
       systemInstruction: `You are SmartPay Agent, an autonomous AI monitoring system for a payment gateway.
 You have detected anomalies in the payment acquirer system and must investigate and resolve them.
 Your goal is to:
@@ -317,7 +326,11 @@ Your goal is to:
 3. Create a formal incident report documenting what happened and what was done
 4. If you cannot resolve the issue confidently, escalate to human admin
 
-Always reason step by step. Be decisive but careful.
+CRITICAL RULES:
+- You MUST call at least one tool (e.g., query_logs, get_acquirer_status) before making ANY decisions.
+- Eğer anomali bir acquirer hatası değil de belirli bir üye işyeri (merchant) hatasıysa, bu sizin otonom yetkiniz dışındadır. Merchant sorunlarını KESİNLİKLE "escalate_to_admin" aracı ile admin'e raporlamalısınız.
+- You must FINALLY call the 'conclude_investigation' tool to finish the investigation. Do NOT output plain text conclusions, ALWAYS use 'conclude_investigation'.
+
 Available acquirer IDs: acquirer_garanti, acquirer_yapikredi, acquirer_isbank.`,
     });
 
@@ -334,11 +347,12 @@ Current metrics (last 5 minutes):
 - Failed transactions: ${metrics.failed}
 - Avg response time: ${metrics.avgResponseTime.toFixed(0)}ms
 
-Please investigate, take appropriate corrective actions, and create an incident report.`;
+CRITICAL INSTRUCTION: First, call 'query_transaction_logs' or 'get_error_distribution' to understand the errors. You MUST call a tool now.`;
 
     const chat = model.startChat();
     let response = await retryWithBackoff(() => chat.sendMessage(initialPrompt));
     let iteration = 0;
+    let finalStatus = 'resolved';
 
     while (iteration < 12) {
       iteration++;
@@ -347,29 +361,57 @@ Please investigate, take appropriate corrective actions, and create an incident 
 
       const toolCalls = content.parts?.filter((p) => p.functionCall) || [];
       if (toolCalls.length === 0) {
-        const finalText = content.parts?.map((p) => p.text || '').join('') || '';
-        reasoningChain.push({ type: 'conclusion', text: finalText, timestamp: new Date().toISOString() });
+        // Fallback if model somehow bypassed ANY mode
+        const finalText = content.parts?.map((p) => p.text || '').join('') || 'No output.';
+        const conclusionStep = { type: 'conclusion', text: finalText, timestamp: new Date().toISOString() };
+        reasoningChain.push(conclusionStep);
+        if (_io) _io.emit('agent:step', { incidentId, step: conclusionStep });
         break;
       }
 
       const toolResults = [];
+      let shouldBreak = false;
+
       for (const part of toolCalls) {
         const { name, args } = part.functionCall;
-        reasoningChain.push({ type: 'tool_call', tool: name, args, timestamp: new Date().toISOString() });
+        
+        if (name === 'conclude_investigation') {
+          const conclusionStep = { type: 'conclusion', text: args.final_conclusion, timestamp: new Date().toISOString() };
+          reasoningChain.push(conclusionStep);
+          if (_io) _io.emit('agent:step', { incidentId, step: conclusionStep });
+          finalStatus = args.resolution_status || 'resolved';
+          shouldBreak = true;
+          break;
+        }
+
+        const callStep = { type: 'tool_call', tool: name, args, timestamp: new Date().toISOString() };
+        reasoningChain.push(callStep);
+        if (_io) _io.emit('agent:step', { incidentId, step: callStep });
+
         const result = await dispatchTool(name, args, { incidentId, acquirerId });
-        reasoningChain.push({ type: 'tool_result', tool: name, result, timestamp: new Date().toISOString() });
-        if (_io) _io.emit('agent:reasoning', { incidentId, step: { tool: name, args, result }, timestamp: new Date().toISOString() });
+
+        const resultStep = { type: 'tool_result', tool: name, result, timestamp: new Date().toISOString() };
+        reasoningChain.push(resultStep);
+        if (_io) _io.emit('agent:step', { incidentId, step: resultStep });
+
         toolResults.push({ functionResponse: { name, response: { result } } });
       }
+
+      if (shouldBreak) break;
 
       response = await retryWithBackoff(() => chat.sendMessage(toolResults));
     }
 
+    const hasEscalated = reasoningChain.some(r => r.type === 'tool_call' && r.tool === 'escalate_to_admin');
+    if (hasEscalated) {
+      finalStatus = 'escalated';
+    }
+
     await db.run(
-      `UPDATE incidents SET reasoning_chain=?, status='resolved', resolved_at=CURRENT_TIMESTAMP WHERE id=?`,
-      JSON.stringify(reasoningChain), incidentId
+      `UPDATE incidents SET reasoning_chain=?, status=?, resolved_at=CURRENT_TIMESTAMP WHERE id=?`,
+      JSON.stringify(reasoningChain), finalStatus, incidentId
     );
-    if (_io) _io.emit('agent:incident', { incidentId, acquirerId, status: 'resolved' });
+    if (_io) _io.emit('agent:incident', { incidentId, acquirerId, status: finalStatus });
   } catch (err) {
     logger.error('Agent investigation error', { acquirerId, error: err.message });
     await db.run("UPDATE incidents SET status='open' WHERE id=?", incidentId).catch(() => {});

@@ -87,6 +87,12 @@ export default function Acquirers() {
                   <div className="acq-stat-box-value">{acq.routingWeight.toFixed(1)}x</div>
                 </div>
               </div>
+
+              {/* Dummy Admin Controls */}
+              <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)', display: 'flex', gap: 8, justifyContent: 'space-between' }}>
+                <button className="btn btn-ghost" style={{ fontSize: '0.75rem', padding: '4px 8px' }} onClick={() => alert('Yönlendirme ağırlığı değiştiriliyor (Admin yetkisi gerektirir)...')}>⚙️ Ayarlar</button>
+                <button className="btn btn-ghost" style={{ fontSize: '0.75rem', padding: '4px 8px', color: 'var(--red)' }} onClick={() => alert('Acquirer kapatılıyor (Sistem yöneticisi onayı bekleniyor)...')}>⛔ Kapat</button>
+              </div>
             </div>
           );
         })}

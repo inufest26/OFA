@@ -13,13 +13,23 @@ router.post('/ask', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.post('/trigger', authMiddleware, async (req, res, next) => {
+router.post('/trigger/acquirer-fault', authMiddleware, async (req, res, next) => {
   try {
     const { investigate } = require('../services/agentService');
-    const anomalies = [{ type: 'manual_trigger', detail: 'Demo amaçlı manuel tetikleme (Yapay Zeka Analizi)' }];
-    const fakeMetrics = { successRate: 0.1, total: 10, errors: { 'ACQUIRER_ERROR': 9 } };
+    const anomalies = [{ type: 'manual_trigger', detail: 'Demo Senaryosu: Yapı Kredi altyapısında genel kesinti. Acquirer hata oranları çok yüksek.' }];
+    const fakeMetrics = { successRate: 0.15, total: 200, avgResponseTime: 450, errors: { 'ACQUIRER_ERROR': 170, 'ACQUIRER_TIMEOUT': 0 } };
     investigate('acquirer_yapikredi', anomalies, fakeMetrics).catch(err => console.error(err));
-    res.json({ success: true, message: 'Agentic AI analysis triggered' });
+    res.json({ success: true, message: 'Acquirer fault analysis triggered' });
+  } catch (err) { next(err); }
+});
+
+router.post('/trigger/merchant-fault', authMiddleware, async (req, res, next) => {
+  try {
+    const { investigate } = require('../services/agentService');
+    const anomalies = [{ type: 'manual_trigger', detail: 'Demo Senaryosu: Belirli bir üye işyeri (M-1024) özelinde hata oranı yüksek. Genel acquirer sağlığı normal.' }];
+    const fakeMetrics = { successRate: 0.92, total: 500, avgResponseTime: 230, errors: { 'ACQUIRER_ERROR': 40 } };
+    investigate('acquirer_garanti', anomalies, fakeMetrics).catch(err => console.error(err));
+    res.json({ success: true, message: 'Merchant fault analysis triggered' });
   } catch (err) { next(err); }
 });
 

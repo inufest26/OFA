@@ -4,6 +4,7 @@ import { getSocket } from '../services/socket';
 import StatsCard from '../components/StatsCard';
 import LiveFeed from '../components/LiveFeed';
 import NotificationBanner from '../components/NotificationBanner';
+import SuccessRateChart from '../components/SuccessRateChart';
 
 export default function Dashboard() {
   const [metrics, setMetrics] = useState(null);
@@ -69,6 +70,8 @@ export default function Dashboard() {
           value={metrics ? metrics.openIncidents : '...'}
         />
       </div>
+
+      <SuccessRateChart />
 
       <div className="grid-2">
         {/* Acquirers */}

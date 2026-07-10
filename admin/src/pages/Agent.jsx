@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { getIncidents, getIncident, askAgent, acknowledgeIncident, triggerDemo } from '../services/api';
+import { getIncidents, getIncident, askAgent, acknowledgeIncident, triggerAcquirerFault, triggerMerchantFault } from '../services/api';
 import { getSocket } from '../services/socket';
 
 const ACQUIRER_NAMES = {
@@ -8,28 +8,88 @@ const ACQUIRER_NAMES = {
   acquirer_isbank:    'İş Bankası',
 };
 
+const TOOL_LABELS = {
+  query_transaction_logs:    '🔍 Transaction logları sorgulanıyor...',
+  get_acquirer_metrics:      '📊 Acquirer metrikleri okunuyor...',
+  get_error_distribution:    '📈 Hata dağılımı analiz ediliyor...',
+  get_all_acquirer_statuses: '🌐 Tüm acquirer durumları kontrol ediliyor...',
+  update_routing_weight:     '⚙️ Routing ağırlığı güncelleniyor...',
+  isolate_acquirer:          '⛔ Acquirer izole ediliyor...',
+  restore_acquirer:          '✅ Acquirer geri yükleniyor...',
+  create_incident_report:    '📋 Incident raporu oluşturuluyor...',
+  escalate_to_admin:         '🚨 Admin\u2019e escalate ediliyor...',
+};
+
 export default function Agent() {
   const [incidents, setIncidents] = useState([]);
   const [activeIncident, setActiveIncident] = useState(null);
+  const [liveSteps, setLiveSteps] = useState([]); // streaming steps
+  const [agentRunning, setAgentRunning] = useState(false);
   const [chat, setChat] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const chatRef = useRef(null);
+  const reasoningRef = useRef(null);
+  const activeIncidentRef = useRef(null);
+
+  // Keep ref in sync for use inside socket callbacks
+  useEffect(() => { activeIncidentRef.current = activeIncident; }, [activeIncident]);
 
   useEffect(() => {
     loadIncidents();
     const socket = getSocket();
-    socket.on('agent:incident', loadIncidents);
-    socket.on('agent:reasoning', (data) => {
-      if (activeIncident && data.incidentId === activeIncident.id) {
-        loadIncidentDetail(activeIncident.id); // Refresh detail
+
+    // New incident started by agent
+    socket.on('agent:action', (data) => {
+      if (data.type === 'investigate') {
+        setAgentRunning(true);
+        setLiveSteps([]);
+        // Auto-open this incident in the panel
+        const newIncident = {
+          id: data.incidentId,
+          title: `Anomaly detected on ${data.acquirerId}`,
+          acquirer_id: data.acquirerId,
+          status: 'open',
+          root_cause: 'Under investigation…',
+          created_at: data.timestamp,
+          reasoningChain: [],
+          recommendations: [],
+        };
+        setActiveIncident(newIncident);
       }
     });
+
+    // Live reasoning step
+    socket.on('agent:step', (data) => {
+      setLiveSteps((prev) => [...prev, data.step]);
+      // Auto scroll
+      if (reasoningRef.current) {
+        setTimeout(() => {
+          if (reasoningRef.current) reasoningRef.current.scrollTop = reasoningRef.current.scrollHeight;
+        }, 50);
+      }
+    });
+
+    // Investigation finished
+    socket.on('agent:incident', async (data) => {
+      setAgentRunning(false);
+      await loadIncidents();
+      // If the active incident is the one that finished, reload its detail
+      if (activeIncidentRef.current?.id === data.incidentId || activeIncidentRef.current?.status === 'open') {
+        try {
+          const detail = await getIncident(data.incidentId);
+          setActiveIncident(detail);
+          setLiveSteps([]);
+        } catch (e) { console.error(e); }
+      }
+    });
+
     return () => {
+      socket.off('agent:action');
+      socket.off('agent:step');
       socket.off('agent:incident');
-      socket.off('agent:reasoning');
     };
-  }, [activeIncident]);
+  }, []);
 
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
@@ -45,6 +105,8 @@ export default function Agent() {
     try {
       const detail = await getIncident(id);
       setActiveIncident(detail);
+      setLiveSteps([]); // Clear live steps when opening a finished incident
+      setAgentRunning(false);
     } catch (e) { console.error(e); }
   }
 
@@ -74,14 +136,35 @@ export default function Agent() {
     }
   }
 
-  async function handleTriggerDemo() {
+  const [triggeringAcquirer, setTriggeringAcquirer] = useState(false);
+  const [triggeringMerchant, setTriggeringMerchant] = useState(false);
+
+  async function handleAcquirerFault() {
+    setTriggeringAcquirer(true);
     try {
-      await triggerDemo();
-      // Anomaly trigger successful, waiting for socket event to refresh incidents
+      await triggerAcquirerFault();
     } catch (err) {
-      console.error('Failed to trigger demo', err);
+      console.error('Failed to trigger acquirer fault', err);
+    } finally {
+      setTimeout(() => setTriggeringAcquirer(false), 1000);
     }
   }
+
+  async function handleMerchantFault() {
+    setTriggeringMerchant(true);
+    try {
+      await triggerMerchantFault();
+    } catch (err) {
+      console.error('Failed to trigger merchant fault', err);
+    } finally {
+      setTimeout(() => setTriggeringMerchant(false), 1000);
+    }
+  }
+
+  // Merge liveSteps with incident's stored reasoningChain for display
+  const displaySteps = (activeIncident?.status === 'open' || agentRunning)
+    ? liveSteps
+    : (activeIncident?.reasoningChain || []);
 
   return (
     <div className="admin-main" style={{ padding: '24px 32px' }}>
@@ -90,9 +173,14 @@ export default function Agent() {
           <h1>Agent AI İzleme & Chat</h1>
           <p>Otonom sistem kararları ve AI asistan</p>
         </div>
-        <button className="btn btn-primary" onClick={handleTriggerDemo} style={{ backgroundColor: '#ff9800', color: 'white', border: 'none', padding: '10px 16px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
-          ✨ Demo Tetikle (Yapay Zeka Analizi)
-        </button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button onClick={handleAcquirerFault} disabled={triggeringAcquirer || agentRunning} style={{ backgroundColor: (triggeringAcquirer || agentRunning) ? '#9ca3af' : '#ef4444', color: 'white', border: 'none', padding: '10px 16px', borderRadius: '4px', cursor: (triggeringAcquirer || agentRunning) ? 'not-allowed' : 'pointer', fontWeight: 'bold', transition: 'background-color 0.2s' }}>
+            {triggeringAcquirer ? '⏳ Başlatılıyor...' : agentRunning ? '🔄 Agent Çalışıyor...' : '🔴 Acquirer Arızası Başlat'}
+          </button>
+          <button onClick={handleMerchantFault} disabled={triggeringMerchant || agentRunning} style={{ backgroundColor: (triggeringMerchant || agentRunning) ? '#9ca3af' : '#eab308', color: 'white', border: 'none', padding: '10px 16px', borderRadius: '4px', cursor: (triggeringMerchant || agentRunning) ? 'not-allowed' : 'pointer', fontWeight: 'bold', transition: 'background-color 0.2s' }}>
+            {triggeringMerchant ? '⏳ Başlatılıyor...' : '🟡 Üye İşyeri Sorunu Başlat'}
+          </button>
+        </div>
       </div>
 
       <div className="agent-layout">
@@ -123,12 +211,13 @@ export default function Agent() {
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
               <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
-                  <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '0.75rem', marginBottom: 10 }} onClick={() => setActiveIncident(null)}>
+                  <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '0.75rem', marginBottom: 10 }} onClick={() => { setActiveIncident(null); setLiveSteps([]); }}>
                     ← Chat'e Dön
                   </button>
                   <h2 style={{ fontSize: '1.2rem' }}>{activeIncident.title}</h2>
                   <div style={{ color: 'var(--muted)', fontSize: '0.85rem', marginTop: 4 }}>
                     Acquirer: {ACQUIRER_NAMES[activeIncident.acquirer_id]} • {new Date(activeIncident.created_at).toLocaleString('tr-TR')}
+                    {agentRunning && <span style={{ marginLeft: 12, color: '#f59e0b', fontWeight: 'bold' }}>● Canlı Analiz</span>}
                   </div>
                 </div>
                 {activeIncident.status === 'resolved' && (
@@ -136,7 +225,7 @@ export default function Agent() {
                 )}
               </div>
 
-              <div className="reasoning-scroll">
+              <div className="reasoning-scroll" ref={reasoningRef}>
                 <div className="section-title">Kök Neden & Öneriler</div>
                 <div style={{ fontSize: '0.85rem', lineHeight: 1.5, marginBottom: 10 }}>
                   <strong>Kök Neden:</strong> {activeIncident.root_cause}
@@ -147,17 +236,36 @@ export default function Agent() {
                   </ul>
                 )}
 
-                <div className="section-title">Agent Düşünce Süreci (Reasoning Chain)</div>
-                {activeIncident.reasoningChain?.map((step, i) => (
-                  <div key={i} className={`reasoning-step ${step.type}`}>
+                <div className="section-title">
+                  Agent Düşünce Süreci (Reasoning Chain)
+                  {agentRunning && (
+                    <span style={{ marginLeft: 8, fontSize: '0.75rem', color: '#f59e0b' }}>
+                      ● düşünüyor...
+                    </span>
+                  )}
+                </div>
+
+                {displaySteps.length === 0 && agentRunning && (
+                  <div style={{ padding: '16px', color: 'var(--muted)', display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
+                    Agent başlatılıyor, veriler toplanıyor...
+                  </div>
+                )}
+
+                {displaySteps.map((step, i) => (
+                  <div key={i} className={`reasoning-step ${step.type}`} style={{ animation: 'fadeIn 0.3s ease' }}>
                     <div className="step-type">
-                      {step.type === 'tool_call' ? '🛠️ ARAÇ KULLANIMI: ' + step.tool :
-                       step.type === 'tool_result' ? '✅ SONUÇ: ' + step.tool :
-                       '🧠 SONUÇ / KARAR'}
+                      {step.type === 'tool_call'   ? (TOOL_LABELS[step.tool] || `🛠️ ${step.tool}`) :
+                       step.type === 'tool_result' ? `✅ Sonuç: ${step.tool}` :
+                       '🧠 Sonuç / Karar'}
                     </div>
-                    {step.type === 'tool_call' && <pre>{JSON.stringify(step.args, null, 2)}</pre>}
-                    {step.type === 'tool_result' && <pre>{JSON.stringify(step.result, null, 2)}</pre>}
-                    {step.type === 'conclusion' && <div>{step.text}</div>}
+                    {step.type === 'tool_call' && step.args && Object.keys(step.args).length > 0 && (
+                      <pre style={{ fontSize: '0.75rem', margin: '4px 0 0', opacity: 0.8 }}>{JSON.stringify(step.args, null, 2)}</pre>
+                    )}
+                    {step.type === 'tool_result' && (
+                      <pre style={{ fontSize: '0.75rem', margin: '4px 0 0', opacity: 0.8, maxHeight: 120, overflow: 'auto' }}>{JSON.stringify(step.result, null, 2)}</pre>
+                    )}
+                    {step.type === 'conclusion' && <div style={{ marginTop: 6, lineHeight: 1.6 }}>{step.text}</div>}
                   </div>
                 ))}
               </div>

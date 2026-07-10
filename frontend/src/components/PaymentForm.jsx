@@ -76,10 +76,8 @@ export default function PaymentForm({ onResult }) {
       setGenerating(false);
     }, 400);
   }
-
   function handleDemoScenario(scenario) {
     setCardType(scenario.type);
-    // Fill the rest of card number after prefix (not Luhn valid but that's fine for demo)
     const rest = '0000000000'.slice(0, 12 - scenario.cardPrefix.length);
     setCardNumber(scenario.cardPrefix + rest);
     setExpiry('12/28');
@@ -87,7 +85,6 @@ export default function PaymentForm({ onResult }) {
     setAmount('100');
     setCustomAmount('');
   }
-
   async function handleSubmit(e) {
     e.preventDefault();
     const finalAmount = parseFloat(activeAmount);

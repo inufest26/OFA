@@ -8,6 +8,7 @@ const config = require('./config');
 const { initDb } = require('./database/init');
 const { initSocket } = require('./socket');
 const { startMonitoring, setAgentService } = require('./services/monitoringService');
+const trafficSimulator = require('./services/trafficSimulator');
 const agentService = require('./services/agentService');
 const errorHandler = require('./middleware/errorHandler');
 const logger = require('./utils/logger');

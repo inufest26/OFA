@@ -26,7 +26,16 @@ export default function PaymentResult({ result, onBack }) {
       </h2>
 
       {/* ── Message ───────────────────────────────────────────────────────── */}
-      <p>{error?.message || (success ? 'İşleminiz başarıyla tamamlandı.' : 'İşlem gerçekleştirilemedi.')}</p>
+      {success ? (
+        <p>İşleminiz başarıyla tamamlandı.</p>
+      ) : (
+        <div style={{ padding: '12px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--red)', borderRadius: '6px', margin: '16px 0', textAlign: 'center' }}>
+          <strong style={{ color: 'var(--red)', display: 'block', marginBottom: '4px' }}>İşlem gerçekleştirilemedi.</strong>
+          <span style={{ fontSize: '0.85rem', color: 'var(--text)' }}>
+            Hata Detayı: {error?.message || 'Bilinmeyen veya teknik bir hata oluştu.'}
+          </span>
+        </div>
+      )}
 
       {/* ── ML Badge ─────────────────────────────────────────────────────── */}
       {topAcquirer && (
@@ -67,10 +76,32 @@ export default function PaymentResult({ result, onBack }) {
 
       {/* ── Retry timeline ───────────────────────────────────────────────── */}
       {retryCount > 0 && retryHistory?.length > 0 && (
-        <div className="retry-badge">
-          ⟳ {retryCount} farklı acquirer denendi — {
-            retryHistory.map((r, i) => `#${i + 1}: ${ACQUIRER_NAMES[r.acquirerId] || r.acquirerId} ${r.success ? '✓' : '✕'}`).join(' → ')
-          }
+        <div className="retry-details">
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Yönlendirme & Yeniden Deneme Adımları ({retryCount} tekrar)
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {retryHistory.map((r, i) => {
+              const acqName = ACQUIRER_NAMES[r.acquirerId] || r.acquirerId;
+              let reason = r.success ? 'İşlem başarılı.' : (r.errorKey ? `Hata: ${r.errorKey}` : 'Bilinmeyen Hata');
+              
+              if (r.errorKey === 'ACQUIRER_TIMEOUT') reason = 'Yanıt alınamadı (Timeout).';
+              if (r.errorKey === 'ACQUIRER_ERROR') reason = 'Sağlayıcı sistemi geçici olarak hata verdi.';
+              if (r.errorKey === 'INSUFFICIENT_FUNDS') reason = 'Yetersiz bakiye.';
+
+              return (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px', background: 'var(--surface2)', borderRadius: '4px', borderLeft: `3px solid ${r.success ? 'var(--green)' : 'var(--red)'}` }}>
+                  <div>
+                    <strong style={{ fontSize: '0.85rem' }}>Adım {r.attempt || i + 1}: {acqName}</strong>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '2px' }}>{reason}</div>
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: r.success ? 'var(--green)' : 'var(--red)' }}>
+                    {r.success ? '✓' : '✕'}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
