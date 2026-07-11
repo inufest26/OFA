@@ -356,8 +356,12 @@ CRITICAL INSTRUCTION: First, call 'query_transaction_logs' or 'get_error_distrib
 
     while (iteration < 12) {
       iteration++;
-      const content = response.candidates?.[0]?.content;
-      if (!content) break;
+      const respObj = response.response || response;
+      const content = respObj.candidates?.[0]?.content;
+      if (!content) {
+         logger.error("No content in AI response", { response: JSON.stringify(respObj) });
+         break;
+      }
 
       const toolCalls = content.parts?.filter((p) => p.functionCall) || [];
       if (toolCalls.length === 0) {
@@ -376,7 +380,16 @@ CRITICAL INSTRUCTION: First, call 'query_transaction_logs' or 'get_error_distrib
         const { name, args } = part.functionCall;
         
         if (name === 'conclude_investigation') {
-          const conclusionStep = { type: 'conclusion', text: args.final_conclusion, timestamp: new Date().toISOString() };
+          // Force at least 2 data tool calls before allowing conclusion
+          const dataCalls = reasoningChain.filter(s => s.type === 'tool_call').length;
+          if (dataCalls < 2) {
+            // Tell AI it must investigate more first
+            toolResults.push({ functionResponse: { name, response: { result: {
+              error: "Too early to conclude. You MUST call at least 2 data tools (query_transaction_logs, get_acquirer_metrics, get_error_distribution, or get_all_acquirer_statuses) before concluding. Please investigate first."
+            }}}});
+            continue;
+          }
+          const conclusionStep = { type: 'conclusion', text: args.final_conclusion || 'Investigation complete.', timestamp: new Date().toISOString() };
           reasoningChain.push(conclusionStep);
           if (_io) _io.emit('agent:step', { incidentId, step: conclusionStep });
           finalStatus = args.resolution_status || 'resolved';

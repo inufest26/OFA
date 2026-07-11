@@ -7,12 +7,14 @@ const { getAllAcquirers } = require('./acquirerSimulator');
 const logger = require('../utils/logger');
 
 const WINDOW_MINUTES = 5;
-const SNAPSHOT_INTERVAL_MS = 30_000;
-const ANOMALY_SUCCESS_THRESHOLD = 0.80;
-const ANOMALY_CONSEC_FAILURES = 5;
+const SNAPSHOT_INTERVAL_MS = 5_000;
+const ANOMALY_SUCCESS_THRESHOLD = 0.50;
+const ANOMALY_CONSEC_FAILURES = 3;
 
 let _io = null;
 let _agentService = null;
+const lastInvestigatedAt = new Map(); // acquirerId -> timestamp
+const INVESTIGATION_COOLDOWN_MS = 60_000; // 60 seconds between investigations per acquirer
 let _monitorTimer = null;
 
 function setSocketIo(io) { _io = io; }
@@ -66,29 +68,39 @@ async function monitoringTick() {
   for (const acq of acquirers) {
     const metrics = await collectWindowMetrics(acq.id);
     await saveSnapshot(acq.id, metrics);
-    if (metrics.total < 3) continue;
-
     const anomalies = [];
-    if (metrics.successRate !== null && metrics.successRate < ANOMALY_SUCCESS_THRESHOLD) {
-      anomalies.push({ type: 'low_success_rate',
-        detail: `Success rate ${(metrics.successRate * 100).toFixed(1)}% < ${ANOMALY_SUCCESS_THRESHOLD * 100}%` });
-    }
-    if (metrics.avgResponseTime > 0 && acq.avgResponseTime > 0 &&
-        metrics.avgResponseTime > acq.avgResponseTime * 2) {
-      anomalies.push({ type: 'high_response_time',
-        detail: `Avg response time ${metrics.avgResponseTime.toFixed(0)}ms > 2× baseline` });
-    }
+
+    // Check consecutive failures FIRST — this fires even if no DB transactions yet
     if (acq.consecutiveFailures >= ANOMALY_CONSEC_FAILURES) {
       anomalies.push({ type: 'consecutive_failures',
         detail: `${acq.consecutiveFailures} consecutive failures` });
+    }
+
+    if (metrics.total >= 1) {
+      if (metrics.successRate !== null && metrics.successRate < ANOMALY_SUCCESS_THRESHOLD) {
+        anomalies.push({ type: 'low_success_rate',
+          detail: `Success rate ${(metrics.successRate * 100).toFixed(1)}% < ${ANOMALY_SUCCESS_THRESHOLD * 100}%` });
+      }
+      if (metrics.avgResponseTime > 0 && acq.avgResponseTime > 0 &&
+          metrics.avgResponseTime > acq.avgResponseTime * 2) {
+        anomalies.push({ type: 'high_response_time',
+          detail: `Avg response time ${metrics.avgResponseTime.toFixed(0)}ms > 2× baseline` });
+      }
     }
 
     if (anomalies.length > 0) {
       logger.warn('Anomaly detected', { acquirerId: acq.id, anomalies });
       if (_io) _io.emit('acquirer:anomaly', { acquirerId: acq.id, anomalies, metrics });
       if (_agentService) {
-        _agentService.investigate(acq.id, anomalies, metrics)
-          .catch((e) => logger.error('Agent investigation failed', { error: e.message }));
+        const lastTime = lastInvestigatedAt.get(acq.id) || 0;
+        const cooldownOk = Date.now() - lastTime > INVESTIGATION_COOLDOWN_MS;
+        if (cooldownOk) {
+          lastInvestigatedAt.set(acq.id, Date.now());
+          _agentService.investigate(acq.id, anomalies, metrics)
+            .catch((e) => logger.error('Agent investigation failed', { error: e.message }));
+        } else {
+          logger.info('Investigation cooldown active, skipping', { acquirerId: acq.id, remainingSec: Math.round((INVESTIGATION_COOLDOWN_MS - (Date.now() - lastTime)) / 1000) });
+        }
       }
     }
   }
@@ -101,7 +113,7 @@ function startMonitoring() {
   _monitorTimer = setInterval(() => {
     monitoringTick().catch((e) => logger.error('Monitoring tick failed', { error: e.message }));
   }, SNAPSHOT_INTERVAL_MS);
-  monitoringTick().catch(() => {});
+  monitoringTick().catch((e) => logger.error('Initial monitoring tick failed', { error: e.message, stack: e.stack }));
 }
 
 function stopMonitoring() {
