@@ -6,7 +6,7 @@ const NAV = [
   { path: '/acquirers',   label: 'Acquirers',    icon: '⬡' },
   { path: '/transactions',label: 'İşlemler',     icon: '↔' },
   { path: '/logs',        label: 'Loglar',       icon: '≡' },
-  { path: '/agent',       label: 'Agent AI',     icon: '◈' },
+  { path: '/agent',       label: 'OFA (Asistan)',     icon: '◈' },
 ];
 
 export default function Sidebar({ wsConnected }) {
@@ -25,7 +25,7 @@ export default function Sidebar({ wsConnected }) {
           <rect x="1" y="4" width="22" height="16" rx="2"/>
           <line x1="1" y1="10" x2="23" y2="10"/>
         </svg>
-        <span className="sidebar-logo-text">Smart<span>Pay</span></span>
+        <span className="sidebar-logo-text"><span>OFA</span> Admin</span>
       </div>
 
       <nav className="sidebar-nav">

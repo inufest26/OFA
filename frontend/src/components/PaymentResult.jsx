@@ -7,7 +7,7 @@ const ACQUIRER_NAMES = {
 };
 
 export default function PaymentResult({ result, onBack }) {
-  const { success, acquirerId, responseTimeMs, retryCount, retryHistory, mlScores, error, transactionId } = result;
+  const { success, acquirerId, responseTimeMs, retryCount, retryHistory, mlScores, error, transactionId, costSavingPct } = result;
 
   const topAcquirer = mlScores
     ? Object.entries(mlScores).sort((a, b) => b[1] - a[1])[0]
@@ -41,6 +41,13 @@ export default function PaymentResult({ result, onBack }) {
       {topAcquirer && (
         <div className="ml-badge">
           🤖 ML — En yüksek skor: {ACQUIRER_NAMES[topAcquirer[0]] || topAcquirer[0]} ({(topAcquirer[1] * 100).toFixed(1)}%)
+        </div>
+      )}
+
+      {/* ── Cost Saving Badge ────────────────────────────────────────────── */}
+      {success && costSavingPct > 0 && (
+        <div className="ml-badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: 'var(--green)', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+          💡 Maliyet Tasarrufu: %{costSavingPct} daha ucuz oran ({ACQUIRER_NAMES[acquirerId] || acquirerId} seçildi)
         </div>
       )}
 

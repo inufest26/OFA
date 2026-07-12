@@ -8,6 +8,12 @@ const ACQUIRER_NAMES = {
   acquirer_isbank:    'İş Bankası',
 };
 
+const STATUS_NAMES = {
+  open: 'açık',
+  resolved: 'çözüldü',
+  escalated: 'iletildi'
+};
+
 const TOOL_LABELS = {
   query_transaction_logs:    '🔍 Transaction logları sorgulanıyor...',
   get_acquirer_metrics:      '📊 Acquirer metrikleri okunuyor...',
@@ -44,18 +50,11 @@ export default function Agent() {
       if (data.type === 'investigate') {
         setAgentRunning(true);
         setLiveSteps([]);
-        // Auto-open this incident in the panel
-        const newIncident = {
-          id: data.incidentId,
-          title: `Anomaly detected on ${data.acquirerId}`,
-          acquirer_id: data.acquirerId,
-          status: 'open',
-          root_cause: 'Under investigation…',
-          created_at: data.timestamp,
-          reasoningChain: [],
-          recommendations: [],
-        };
-        setActiveIncident(newIncident);
+        // Don't auto-open it to preserve chat. Instead, send a notification to the chat.
+        setChat((c) => [...c, { 
+          role: 'agent', 
+          text: `🚨 **Yeni Otonom Müdahale Başladı**\n\nSistemde bir anomali tespit ettim (${data.acquirerId}). Arka planda incelemeye başladım. Detayları sol paneldeki olay listesinden görebilir veya bana buradan sorabilirsin.` 
+        }]);
       }
     });
 
@@ -105,9 +104,19 @@ export default function Agent() {
     try {
       const detail = await getIncident(id);
       setActiveIncident(detail);
-      setLiveSteps([]); // Clear live steps when opening a finished incident
-      setAgentRunning(false);
+      setLiveSteps([]); 
+      // Do not kill agentRunning if it's currently running on an open incident
+      if (detail.status !== 'open') {
+        setAgentRunning(false);
+      }
     } catch (e) { console.error(e); }
+  }
+
+  function handleBackToChat() {
+    setActiveIncident(null);
+    if (!agentRunning) {
+      setLiveSteps([]);
+    }
   }
 
   async function handleAck() {
@@ -122,7 +131,15 @@ export default function Agent() {
   async function handleAsk(e) {
     e.preventDefault();
     if (!input.trim()) return;
-    const q = input;
+    await submitQuestion(input);
+  }
+
+  async function handleQuickAsk(q) {
+    if (loading) return;
+    await submitQuestion(q);
+  }
+
+  async function submitQuestion(q) {
     setInput('');
     setChat((c) => [...c, { role: 'user', text: q }]);
     setLoading(true);
@@ -195,7 +212,7 @@ export default function Agent() {
             >
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <div className="incident-item-title">{inc.title}</div>
-                <div className={`badge ${inc.status}`}>{inc.status}</div>
+                <div className={`badge ${inc.status}`}>{STATUS_NAMES[inc.status] || inc.status}</div>
               </div>
               <div className="incident-item-meta">
                 {ACQUIRER_NAMES[inc.acquirer_id] || inc.acquirer_id} • {new Date(inc.created_at).toLocaleTimeString('tr-TR')}
@@ -211,7 +228,7 @@ export default function Agent() {
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
               <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
-                  <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '0.75rem', marginBottom: 10 }} onClick={() => { setActiveIncident(null); setLiveSteps([]); }}>
+                  <button className="btn btn-ghost" style={{ padding: '8px 12px', fontSize: '0.85rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: '6px', cursor: 'pointer' }} onClick={handleBackToChat}>
                     ← Chat'e Dön
                   </button>
                   <h2 style={{ fontSize: '1.2rem' }}>{activeIncident.title}</h2>
@@ -221,7 +238,7 @@ export default function Agent() {
                   </div>
                 </div>
                 {activeIncident.status === 'resolved' && (
-                  <button className="btn btn-primary" onClick={handleAck}>Kapat / Acknowledge</button>
+                  <button className="btn btn-primary" onClick={handleAck}>Kapat / Onayla</button>
                 )}
               </div>
 
@@ -274,22 +291,42 @@ export default function Agent() {
             <div className="chat-layout">
               <div className="chat-messages" ref={chatRef}>
                 <div className="chat-bubble agent">
-                  Merhaba, ben SmartPay Agent. Sistem sağlığını arka planda sürekli izliyorum. Bir anomali algılarsam müdahale ederim. Bana sistemin durumu, belirli bir sağlayıcının sağlığı veya genel metrikler hakkında sorular sorabilirsiniz.
+                  Merhaba, ben OFA (Otonom Finans Asistanı). Sistem sağlığını arka planda sürekli izliyorum. Bir anomali algılarsam müdahale ederim. Bana sistemin durumu, belirli bir sağlayıcının sağlığı veya genel metrikler hakkında sorular sorabilirsiniz. Ayrıca "Şu bankayı kapat" gibi komutlar da verebilirsiniz.
                 </div>
                 {chat.map((msg, i) => (
-                  <div key={i} className={`chat-bubble ${msg.role}`}>{msg.text}</div>
+                  <div key={i} className={`chat-bubble ${msg.role}`} style={{ whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
+                    {msg.text.split(/(\*\*.*?\*\*)/g).map((part, idx) => {
+                      if (part.startsWith('**') && part.endsWith('**')) {
+                        return <strong key={idx}>{part.slice(2, -2)}</strong>;
+                      }
+                      return part;
+                    })}
+                  </div>
                 ))}
                 {loading && <div className="chat-bubble agent thinking">Düşünüyor...</div>}
               </div>
-              <form className="chat-input-row" onSubmit={handleAsk}>
-                <input
-                  type="text" className="chat-input"
-                  placeholder="Sistem durumu nasıl? Garanti'de sorun mu var?..."
-                  value={input} onChange={(e) => setInput(e.target.value)}
-                  disabled={loading}
-                />
-                <button type="submit" className="chat-send-btn" disabled={loading || !input.trim()}>Sor</button>
-              </form>
+              <div className="chat-input-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div className="quick-actions" style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
+                  <button onClick={() => handleQuickAsk('Şu anki sistem metrikleri nasıl?')} className="quick-btn" disabled={loading} style={{ whiteSpace: 'nowrap', fontSize: '0.75rem', padding: '6px 12px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: '16px', color: 'var(--text)', cursor: 'pointer' }}>
+                    📊 Metrikleri İncele
+                  </button>
+                  <button onClick={() => handleQuickAsk('Açık olan veya incelenen vakalar var mı?')} className="quick-btn" disabled={loading} style={{ whiteSpace: 'nowrap', fontSize: '0.75rem', padding: '6px 12px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: '16px', color: 'var(--text)', cursor: 'pointer' }}>
+                    🚨 Vakaları Raporla
+                  </button>
+                  <button onClick={() => handleQuickAsk('Sorunlu olan bankaları kapat')} className="quick-btn" disabled={loading} style={{ whiteSpace: 'nowrap', fontSize: '0.75rem', padding: '6px 12px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '16px', color: 'var(--red)', cursor: 'pointer' }}>
+                    ⛔ Sorunluları Kapat
+                  </button>
+                </div>
+                <form className="chat-input-row" onSubmit={handleAsk}>
+                  <input
+                    type="text" className="chat-input"
+                    placeholder="Sistem durumu nasıl? Garanti'de sorun mu var?..."
+                    value={input} onChange={(e) => setInput(e.target.value)}
+                    disabled={loading}
+                  />
+                  <button type="submit" className="chat-send-btn" disabled={loading || !input.trim()}>Sor</button>
+                </form>
+              </div>
             </div>
           )}
         </div>

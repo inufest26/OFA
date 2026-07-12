@@ -98,6 +98,7 @@ class MLRouter {
         avgResponseTime: a.avgResponseTime,
         transactionCount: a.totalTransactions,
         errorRate: 1 - a.currentSuccessRate,
+        commissionRate: a.commissionRate || 0.02,
       };
     }
     return metrics;
@@ -134,28 +135,45 @@ class MLRouter {
     const isPeak = features.hour >= 9 && features.hour < 18;
     const timeBonus = isPeak ? 0.5 : 0.8;
 
+    // Cost optimization: Find the most expensive active acquirer
+    const commissions = activeAcquirers.map((a) => a.commissionRate || 0.02);
+    const maxCommission = Math.max(...commissions);
+    const minCommission = Math.min(...commissions);
+    const costRange = maxCommission - minCommission || 1;
+
     const scores = {};
     for (const acq of activeAcquirers) {
       const m = acquirerMetrics[acq.id] || {};
-      const successScore = (m.successRate || acq.currentSuccessRate) * 0.50;
+      const successScore = (m.successRate || acq.currentSuccessRate) * 0.40; // Reduced from 50
       const normTime = (maxTime - (m.avgResponseTime || 300)) / timeRange;
-      const respScore = normTime * 0.20;
+      const respScore = normTime * 0.15; // Reduced from 20
+      
+      // Cost score (Cheaper = higher score, weight 20%)
+      const acqCommission = acq.commissionRate || 0.02;
+      const costScore = ((maxCommission - acqCommission) / costRange) * 0.20;
+
       const affinity = cardAffinity[acq.id]?.[features.cardType] ?? 0.8;
       const affinityScore = affinity * 0.15;
-      const slotScore = timeBonus * 0.15;
+      const slotScore = timeBonus * 0.10; // Reduced from 15
+
       scores[acq.id] = parseFloat(
-        (successScore + respScore + affinityScore + slotScore).toFixed(4)
+        (successScore + respScore + costScore + affinityScore + slotScore).toFixed(4)
       );
     }
 
     // Pick winner
     const selectedAcquirer = Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0];
 
+    // Calculate savings
+    const selectedCommission = activeAcquirers.find(a => a.id === selectedAcquirer)?.commissionRate || 0.02;
+    const costSavingPct = maxCommission - selectedCommission;
+
     return {
       scores,
       selectedAcquirer,
       confidence: scores[selectedAcquirer],
       method: 'placeholder-heuristic',
+      costSavingPct: costSavingPct > 0 ? parseFloat((costSavingPct * 100).toFixed(2)) : 0
     };
   }
 

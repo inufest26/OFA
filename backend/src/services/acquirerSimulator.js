@@ -16,21 +16,21 @@ const SPECIAL_CARDS = {
 const acquirerState = {
   acquirer_garanti: {
     id: 'acquirer_garanti', name: 'Garanti Sanal POS',
-    isActive: true, routingWeight: 1.0,
+    isActive: true, routingWeight: 1.0, commissionRate: 0.015,
     baseSuccessRate: 0.94, currentSuccessRate: 0.94, avgResponseTime: 230,
     anomalyMode: false, totalTransactions: 0, successfulTransactions: 0,
     failedTransactions: 0, consecutiveFailures: 0, isolatedAt: null, isolationReason: null,
   },
   acquirer_yapikredi: {
     id: 'acquirer_yapikredi', name: 'Yapı Kredi Sanal POS',
-    isActive: true, routingWeight: 1.0,
+    isActive: true, routingWeight: 1.0, commissionRate: 0.017,
     baseSuccessRate: 0.91, currentSuccessRate: 0.91, avgResponseTime: 310,
     anomalyMode: false, totalTransactions: 0, successfulTransactions: 0,
     failedTransactions: 0, consecutiveFailures: 0, isolatedAt: null, isolationReason: null,
   },
   acquirer_isbank: {
     id: 'acquirer_isbank', name: 'İş Bankası Sanal POS',
-    isActive: true, routingWeight: 1.0,
+    isActive: true, routingWeight: 1.0, commissionRate: 0.019,
     baseSuccessRate: 0.88, currentSuccessRate: 0.88, avgResponseTime: 280,
     anomalyMode: false, totalTransactions: 0, successfulTransactions: 0,
     failedTransactions: 0, consecutiveFailures: 0, isolatedAt: null, isolationReason: null,

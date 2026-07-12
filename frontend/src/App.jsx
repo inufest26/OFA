@@ -12,7 +12,7 @@ export default function App() {
           <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
           <line x1="1" y1="10" x2="23" y2="10"/>
         </svg>
-        <h1>Smart<span>Pay</span> Agent</h1>
+        <h1><span>Otonom Finans Asistanı</span> (OFA)</h1>
       </div>
 
       <div className={`card ${result ? 'fade-in' : ''}`}>

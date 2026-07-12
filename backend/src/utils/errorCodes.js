@@ -13,32 +13,32 @@ const ERROR_CODES = {
   INSUFFICIENT_FUNDS: {
     code: 'E001',
     retryable: false,
-    description: 'Insufficient funds',
-    userMessage: 'Your card has insufficient funds for this transaction.',
+    description: 'Yetersiz bakiye',
+    userMessage: 'Kartınızda bu işlem için yeterli bakiye bulunmuyor.',
   },
   CARD_EXPIRED: {
     code: 'E002',
     retryable: false,
-    description: 'Card expired',
-    userMessage: 'Your card has expired. Please use a different card.',
+    description: 'Süresi dolmuş kart',
+    userMessage: 'Kartınızın süresi dolmuş. Lütfen başka bir kart kullanın.',
   },
   CARD_BLOCKED: {
     code: 'E003',
     retryable: false,
-    description: 'Card blocked',
-    userMessage: 'Your card has been blocked. Please contact your bank.',
+    description: 'Bloke kart',
+    userMessage: 'Kartınız bloke edilmiştir. Lütfen bankanızla iletişime geçin.',
   },
   INVALID_CARD: {
     code: 'E004',
     retryable: false,
-    description: 'Invalid card',
-    userMessage: 'The card information provided is invalid.',
+    description: 'Geçersiz kart',
+    userMessage: 'Girdiğiniz kart bilgileri geçersizdir.',
   },
   FRAUD_SUSPECTED: {
     code: 'E005',
     retryable: false,
-    description: 'Fraud suspected',
-    userMessage: 'This transaction has been flagged. Please contact your bank.',
+    description: 'Şüpheli işlem',
+    userMessage: 'Bu işlem şüpheli bulunmuştur. Lütfen bankanızla iletişime geçin.',
   },
 
   // ── Transient failures ──────────────────────────────────────────────────────
@@ -46,36 +46,36 @@ const ERROR_CODES = {
     code: 'E101',
     retryable: true,
     strategy: 'different_acquirer',
-    description: 'Acquirer timeout',
-    userMessage: 'The payment gateway timed out. Retrying with another provider.',
+    description: 'Zaman aşımı',
+    userMessage: 'Ödeme altyapısı zaman aşımına uğradı. Başka bir sağlayıcı ile tekrar deneniyor.',
   },
   ACQUIRER_ERROR: {
     code: 'E102',
     retryable: true,
     strategy: 'different_acquirer',
-    description: 'Acquirer system error',
-    userMessage: 'The payment provider experienced an error. Retrying.',
+    description: 'Sistem hatası',
+    userMessage: 'Ödeme sağlayıcısında bir hata oluştu. Tekrar deneniyor.',
   },
   NETWORK_ERROR: {
     code: 'E103',
     retryable: true,
     strategy: 'same_acquirer_delayed',
-    description: 'Network error',
-    userMessage: 'A network issue occurred. Retrying momentarily.',
+    description: 'Ağ hatası',
+    userMessage: 'Ağ bağlantısında bir sorun oluştu. Kısa süre içinde tekrar denenecek.',
   },
   RATE_LIMIT: {
     code: 'E104',
     retryable: true,
     strategy: 'different_acquirer',
-    description: 'Rate limit exceeded',
-    userMessage: 'Too many requests to this provider. Retrying with another.',
+    description: 'Limit aşıldı',
+    userMessage: 'Bu sağlayıcıya çok fazla istek gönderildi. Başka bir sağlayıcı ile tekrar deneniyor.',
   },
   TEMPORARY_UNAVAILABLE: {
     code: 'E105',
     retryable: true,
     strategy: 'different_acquirer',
-    description: 'Temporary service unavailability',
-    userMessage: 'The payment provider is temporarily unavailable. Retrying.',
+    description: 'Geçici kesinti',
+    userMessage: 'Ödeme sağlayıcısı geçici olarak hizmet veremiyor. Tekrar deneniyor.',
   },
 };
 
@@ -88,8 +88,8 @@ function getError(key) {
     ERROR_CODES[key] || {
       code: 'E999',
       retryable: false,
-      description: 'Unknown error',
-      userMessage: 'An unknown error occurred.',
+      description: 'Bilinmeyen hata',
+      userMessage: 'Bilinmeyen bir hata oluştu.',
     }
   );
 }

@@ -83,7 +83,7 @@ router.post('/', async (req, res, next) => {
       acquirerName: _acquirerName(paymentResult.acquirerId),
       responseTimeMs: totalTime, retryCount: paymentResult.retryCount,
       retryHistory: paymentResult.retryHistory, mlScores: routingResult.scores,
-      mlMethod: routingResult.method,
+      mlMethod: routingResult.method, costSavingPct: routingResult.costSavingPct,
       error: errorDef ? { code: errorDef.code, message: errorDef.userMessage } : null,
     });
   } catch (err) { next(err); }

@@ -298,16 +298,22 @@ async function dispatchTool(toolName, args, context) {
 
 // ── Main investigation ────────────────────────────────────────────────────────
 
-async function investigate(acquirerId, anomalies, metrics) {
+async function investigate(acquirerId, anomalies, metrics, isRecovery = false) {
   if (activeInvestigations.has(acquirerId)) return;
   activeInvestigations.add(acquirerId);
 
+  let incidentId = null;
   const db = getDb();
-  const { lastInsertRowid: incidentId } = await db.run(
+  
+  // Recovery vs Anomaly titles
+  const title = isRecovery ? `Otonom İyileşme: ${acquirerId}` : `Anomali algılandı: ${acquirerId}`;
+  
+  const { lastInsertRowid: newIncidentId } = await db.run(
     `INSERT INTO incidents (title,severity,acquirer_id,root_cause,status)
-     VALUES (?,'high',?,'Under investigation','open')`,
-    `Anomaly detected on ${acquirerId}`, acquirerId
+     VALUES (?,'high',?,'İnceleniyor...','open')`,
+    title, acquirerId
   );
+  incidentId = newIncidentId;
 
   const reasoningChain = [];
   logger.info('Agent investigation started', { acquirerId, incidentId });
@@ -318,13 +324,16 @@ async function investigate(acquirerId, anomalies, metrics) {
       model: GEMINI_MODEL,
       tools: [{ functionDeclarations: agentToolDeclarations }],
       toolConfig: { functionCallingConfig: { mode: "ANY" } },
-      systemInstruction: `You are SmartPay Agent, an autonomous AI monitoring system for a payment gateway.
+      systemInstruction: `You are OFA (Otonom Finans Asistanı), an autonomous AI monitoring system for a payment gateway.
 You have detected anomalies in the payment acquirer system and must investigate and resolve them.
 Your goal is to:
 1. Investigate the root cause using the available tools
 2. Take corrective action (update routing weights, isolate acquirers if absolutely necessary)
 3. Create a formal incident report documenting what happened and what was done
 4. If you cannot resolve the issue confidently, escalate to human admin
+
+IMPORTANT: All your internal reasoning (final_conclusion) and user-facing reports MUST be in Turkish.
+Do NOT output English. Always respond in Turkish.
 
 CRITICAL RULES:
 - You MUST call at least one tool (e.g., query_logs, get_acquirer_status) before making ANY decisions.
@@ -335,19 +344,34 @@ Available acquirer IDs: acquirer_garanti, acquirer_yapikredi, acquirer_isbank.`,
     });
 
     const anomalyDescription = anomalies.map((a) => `- ${a.type}: ${a.detail}`).join('\n');
-    const initialPrompt = `ANOMALY ALERT — Immediate investigation required.
+    
+    let initialPrompt = '';
+    if (isRecovery) {
+      initialPrompt = `SİSTEM İYİLEŞME BİLDİRİMİ (SELF-HEALING)
 
-Affected acquirer: ${acquirerId}
-Detected anomalies:
+İzole edilmiş sağlayıcı: ${acquirerId}
+Durum: ${anomalyDescription}
+
+Güncel metrikler (Son Gölge İşlemler):
+- Başarı oranı: ${metrics.successRate !== null ? (metrics.successRate * 100).toFixed(1) + '%' : 'N/A'}
+- Ort. yanıt süresi: ${metrics.avgResponseTime.toFixed(0)}ms
+
+KRİTİK TALİMAT: Bu sağlayıcı daha önce hatalar yüzünden kapatılmıştı. Şimdi sağlıklı görünüyor. Lütfen 'get_acquirer_metrics' ile durumunu kontrol edin ve eğer uygunsa 'restore_acquirer' aracı ile sistemi tekrar otonom olarak devreye alın. Açıklamalarınızı TÜRKÇE yapın.`;
+    } else {
+      initialPrompt = `ANOMALİ ALARMI — Acil inceleme gerekiyor.
+
+Etkilenen sağlayıcı (acquirer): ${acquirerId}
+Tespit edilen anomaliler:
 ${anomalyDescription}
 
-Current metrics (last 5 minutes):
-- Total transactions: ${metrics.total}
-- Success rate: ${metrics.successRate !== null ? (metrics.successRate * 100).toFixed(1) + '%' : 'N/A'}
-- Failed transactions: ${metrics.failed}
-- Avg response time: ${metrics.avgResponseTime.toFixed(0)}ms
+Güncel metrikler (Son 5 dakika):
+- Toplam işlem: ${metrics.total}
+- Başarı oranı: ${metrics.successRate !== null ? (metrics.successRate * 100).toFixed(1) + '%' : 'N/A'}
+- Başarısız işlem: ${metrics.failed}
+- Ort. yanıt süresi: ${metrics.avgResponseTime.toFixed(0)}ms
 
-CRITICAL INSTRUCTION: First, call 'query_transaction_logs' or 'get_error_distribution' to understand the errors. You MUST call a tool now.`;
+KRİTİK TALİMAT: İlk olarak 'query_transaction_logs' veya 'get_error_distribution' aracını çağırarak hataları inceleyin. Tüm açıklamalarınızı TÜRKÇE yapın.`;
+    }
 
     const chat = model.startChat();
     let response = await retryWithBackoff(() => chat.sendMessage(initialPrompt));
@@ -443,10 +467,10 @@ async function askAgent(question) {
     const ctx = await buildSystemContext();
 
     // 2. Build a rich, structured prompt
-    const systemPrompt = `You are SmartPay Agent, an AI monitoring assistant for a payment gateway system.
-You will be given real-time system data and must answer the admin's question based on that data.
-Be concise, factual, and actionable. Respond in the same language as the question (Turkish or English).
-If you see anomalies or issues in the data, proactively highlight them.`;
+    const systemInstruction = `You are OFA (Otonom Finans Asistanı), an AI assistant for a payment gateway system.
+You can answer questions using the provided snapshot context OR use system tools to perform actions like isolating or restoring acquirers.
+If the admin asks you to perform an action (e.g. "Kapat", "İzole et", "Geri aç"), you MUST use the appropriate tool.
+Always respond in Turkish.`;
 
     const userPrompt = `=== REAL-TIME SYSTEM SNAPSHOT (${ctx.timestamp}) ===
 
@@ -461,13 +485,6 @@ ${ctx.acquirers.map((a) => `- ${a.name} [${a.id}]:
   Routing Weight: ${a.routingWeight}x
   Consecutive Failures: ${a.consecutiveFailures}`).join('\n')}
 
-LAST 30 MIN TRANSACTIONS BY ACQUIRER:
-${Object.entries(ctx.last30minTxByAcquirer).length > 0
-  ? Object.entries(ctx.last30minTxByAcquirer).map(([id, s]) =>
-    `- ${id}: ${s.total} total, ${s.success} success (${s.total > 0 ? ((s.success/s.total)*100).toFixed(1) : 0}%), errors: ${JSON.stringify(s.errors)}`
-  ).join('\n')
-  : '(no transactions in last 30 minutes)'}
-
 RECENT INCIDENTS:
 ${ctx.recentIncidents.length > 0
   ? ctx.recentIncidents.map((i) => `- [${i.severity}] ${i.title} — ${i.status} (${i.acquirer_id})`).join('\n')
@@ -476,15 +493,48 @@ ${ctx.recentIncidents.length > 0
 === ADMIN QUESTION ===
 ${question}`;
 
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-    // Single concatenated string — avoid array format which can trigger empty-response SDK errors
-    const fullPrompt = systemPrompt + '\n\n' + userPrompt;
-    const response = await retryWithBackoff(() => model.generateContent(fullPrompt));
+    const model = genAI.getGenerativeModel({
+      model: GEMINI_MODEL,
+      tools: [{ functionDeclarations: agentToolDeclarations }],
+      toolConfig: { functionCallingConfig: { mode: "AUTO" } },
+      systemInstruction
+    });
 
-    const text = extractText(response);
-    if (text) return text;
+    const chat = model.startChat();
+    let response = await retryWithBackoff(() => chat.sendMessage(userPrompt));
+    let iteration = 0;
+    
+    while (iteration < 5) {
+      iteration++;
+      
+      const responseObj = response.response ? response.response : response;
+      const content = responseObj.candidates?.[0]?.content;
+      
+      if (!content) break;
 
-    return 'Agent şu anda yanıt üretemedi. Lütfen tekrar deneyin.';
+      const functionCalls = content.parts.filter(p => p.functionCall).map(p => p.functionCall);
+      const textParts = content.parts.filter(p => p.text).map(p => p.text);
+      let textOutput = textParts.join('\n');
+
+      if (functionCalls.length > 0) {
+        const functionResponses = [];
+        for (const call of functionCalls) {
+          const result = await dispatchTool(call.name, call.args);
+          functionResponses.push({
+            functionResponse: {
+              name: call.name,
+              response: { result }
+            }
+          });
+        }
+        response = await retryWithBackoff(() => chat.sendMessage(functionResponses));
+      } else {
+        if (textOutput) return textOutput;
+        break;
+      }
+    }
+
+    return 'Agent işlemini tamamladı ancak metin yanıtı üretemedi.';
 
   } catch (err) {
     const errInfo = isErrorResponse(err);

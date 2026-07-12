@@ -69,22 +69,28 @@ async function monitoringTick() {
     const metrics = await collectWindowMetrics(acq.id);
     await saveSnapshot(acq.id, metrics);
     const anomalies = [];
+    const consec = acq.consecutiveFailures;
 
-    // Check consecutive failures FIRST — this fires even if no DB transactions yet
-    if (acq.consecutiveFailures >= ANOMALY_CONSEC_FAILURES) {
-      anomalies.push({ type: 'consecutive_failures',
-        detail: `${acq.consecutiveFailures} consecutive failures` });
+    if (consec >= ANOMALY_CONSEC_FAILURES) {
+      anomalies.push({
+        type: 'ardışık_hata',
+        detail: `${consec} ardışık hata`,
+      });
     }
 
     if (metrics.total >= 1) {
       if (metrics.successRate !== null && metrics.successRate < ANOMALY_SUCCESS_THRESHOLD) {
-        anomalies.push({ type: 'low_success_rate',
-          detail: `Success rate ${(metrics.successRate * 100).toFixed(1)}% < ${ANOMALY_SUCCESS_THRESHOLD * 100}%` });
+        anomalies.push({
+          type: 'düşük_başarı_oranı',
+          detail: `Başarı oranı ${(metrics.successRate * 100).toFixed(1)}% (< ${(ANOMALY_SUCCESS_THRESHOLD * 100)}%)`,
+        });
       }
       if (metrics.avgResponseTime > 0 && acq.avgResponseTime > 0 &&
           metrics.avgResponseTime > acq.avgResponseTime * 2) {
-        anomalies.push({ type: 'high_response_time',
-          detail: `Avg response time ${metrics.avgResponseTime.toFixed(0)}ms > 2× baseline` });
+        anomalies.push({
+          type: 'yüksek_yanıt_süresi',
+          detail: `Ortalama yanıt süresi ${metrics.avgResponseTime.toFixed(0)}ms (> 2× normal değer)`,
+        });
       }
     }
 
@@ -112,8 +118,31 @@ function startMonitoring() {
   logger.info(`Monitoring started (interval: ${SNAPSHOT_INTERVAL_MS / 1000}s)`);
   _monitorTimer = setInterval(() => {
     monitoringTick().catch((e) => logger.error('Monitoring tick failed', { error: e.message }));
+    checkIsolatedAcquirers().catch((e) => logger.error('Health check failed', { error: e.message }));
   }, SNAPSHOT_INTERVAL_MS);
   monitoringTick().catch((e) => logger.error('Initial monitoring tick failed', { error: e.message, stack: e.stack }));
+}
+
+async function checkIsolatedAcquirers() {
+  const acquirers = getAllAcquirers();
+  for (const acq of acquirers) {
+    if (!acq.isActive && acq.isolatedAt) {
+      // Gölge işlem (Shadow Transaction) kontrolü simülasyonu
+      // Eğer altyapı düzelmişse (baseSuccessRate > 0.85), AI'a iyileştirme tavsiyesi gönder
+      if (acq.baseSuccessRate > 0.85 && _agentService) {
+        logger.info(`Self-healing triggered for ${acq.id}, asking AI to evaluate.`);
+        const anomalies = [{ type: 'iyileşme_tespit_edildi', detail: 'Sistem sağlıklı görünüyor.' }];
+        const metrics = { total: 10, successRate: acq.baseSuccessRate, failed: 0, avgResponseTime: acq.avgResponseTime };
+        // Yalnızca son 60 saniyede incelemediysek yap
+        const lastTime = lastInvestigatedAt.get(acq.id) || 0;
+        if (Date.now() - lastTime > INVESTIGATION_COOLDOWN_MS) {
+          lastInvestigatedAt.set(acq.id, Date.now());
+          _agentService.investigate(acq.id, anomalies, metrics, true)
+            .catch((e) => logger.error('Agent recovery failed', { error: e.message }));
+        }
+      }
+    }
+  }
 }
 
 function stopMonitoring() {
