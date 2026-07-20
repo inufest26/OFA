@@ -1,7 +1,3 @@
-/**
- * Agentic AI Service — Gemini Function Calling, async sqlite3 edition
- * All prompts are in English.
- */
 
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { getDb } = require('../database/init');

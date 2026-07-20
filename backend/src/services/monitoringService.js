@@ -1,6 +1,3 @@
-/**
- * Monitoring Service — async sqlite3 edition
- */
 
 const { getDb } = require('../database/init');
 const { getAllAcquirers } = require('./acquirerSimulator');
@@ -126,20 +123,15 @@ function startMonitoring() {
 async function checkIsolatedAcquirers() {
   const acquirers = getAllAcquirers();
   for (const acq of acquirers) {
-    if (!acq.isActive && acq.isolatedAt) {
-      // Gölge işlem (Shadow Transaction) kontrolü simülasyonu
-      // Eğer altyapı düzelmişse (baseSuccessRate > 0.85), AI'a iyileştirme tavsiyesi gönder
-      if (acq.baseSuccessRate > 0.85 && _agentService) {
-        logger.info(`Self-healing triggered for ${acq.id}, asking AI to evaluate.`);
-        const anomalies = [{ type: 'iyileşme_tespit_edildi', detail: 'Sistem sağlıklı görünüyor.' }];
-        const metrics = { total: 10, successRate: acq.baseSuccessRate, failed: 0, avgResponseTime: acq.avgResponseTime };
-        // Yalnızca son 60 saniyede incelemediysek yap
-        const lastTime = lastInvestigatedAt.get(acq.id) || 0;
-        if (Date.now() - lastTime > INVESTIGATION_COOLDOWN_MS) {
-          lastInvestigatedAt.set(acq.id, Date.now());
-          _agentService.investigate(acq.id, anomalies, metrics, true)
-            .catch((e) => logger.error('Agent recovery failed', { error: e.message }));
-        }
+    if (!acq.isActive && acq.isolatedAt && acq.baseSuccessRate > 0.85 && _agentService) {
+      logger.info(`Self-healing check: ${acq.id} looks healthy, asking agent to evaluate.`);
+      const anomalies = [{ type: 'iyileşme_tespit_edildi', detail: 'Sistem sağlıklı görünüyor.' }];
+      const metrics = { total: 10, successRate: acq.baseSuccessRate, failed: 0, avgResponseTime: acq.avgResponseTime };
+      const lastTime = lastInvestigatedAt.get(acq.id) || 0;
+      if (Date.now() - lastTime > INVESTIGATION_COOLDOWN_MS) {
+        lastInvestigatedAt.set(acq.id, Date.now());
+        _agentService.investigate(acq.id, anomalies, metrics, true)
+          .catch((e) => logger.error('Agent recovery failed', { error: e.message }));
       }
     }
   }

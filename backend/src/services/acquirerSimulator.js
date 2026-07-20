@@ -1,7 +1,3 @@
-/**
- * Acquirer Simulator — async sqlite3 edition
- */
-
 const { getDb } = require('../database/init');
 const logger = require('../utils/logger');
 
@@ -37,33 +33,30 @@ const acquirerState = {
   },
 };
 
-// ── Organic Instability (Metrics Drift) ───────────────────────────────────────
-// Simulates real-world network fluctuations. Base success rates and response times
-// drift randomly over time. Sometimes an acquirer completely degrades.
+// Drift base success rates and response times every 30s to simulate real-world fluctuations.
+// 1% chance of a severe outage per tick; otherwise gentle random drift.
 setInterval(() => {
   for (const key of Object.keys(acquirerState)) {
     const acq = acquirerState[key];
     
-    // 1% chance for a severe outage/degradation per tick (30s)
     if (Math.random() < 0.01) {
-      acq.baseSuccessRate = Math.max(0.1, acq.baseSuccessRate - 0.4); // Sudden drop
-      acq.avgResponseTime = Math.min(2000, acq.avgResponseTime + 500); // Sudden lag
+      acq.baseSuccessRate = Math.max(0.1, acq.baseSuccessRate - 0.4);
+      acq.avgResponseTime = Math.min(2000, acq.avgResponseTime + 500);
       logger.warn(`Sudden network degradation detected for ${acq.name}!`);
     } else {
-      // Normal drift
-      const driftRate = (Math.random() * 0.1) - 0.05; // -5% to +5%
+      const driftRate = (Math.random() * 0.1) - 0.05;
       acq.baseSuccessRate = Math.min(0.99, Math.max(0.20, acq.baseSuccessRate + driftRate));
       
-      const driftTime = (Math.random() * 60) - 30; // -30ms to +30ms
+      const driftTime = (Math.random() * 60) - 30;
       acq.avgResponseTime = Math.min(1000, Math.max(100, acq.avgResponseTime + driftTime));
     }
     
-    // Naturally decay currentSuccessRate towards baseSuccessRate so UI moves without traffic
+    // EMA decay toward base rate so the UI updates even without incoming traffic
     acq.currentSuccessRate = acq.currentSuccessRate * 0.8 + acq.baseSuccessRate * 0.2;
     
     persistState(acq).catch(() => {});
   }
-}, 30000); // Every 30 seconds
+}, 30000);
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 function jitterTime(base) { return Math.round(base * (0.8 + Math.random() * 0.4)); }
@@ -132,7 +125,7 @@ async function processPayment(acquirerId, transaction) {
   if (success) { acq.successfulTransactions += 1; acq.consecutiveFailures = 0; }
   else         { acq.failedTransactions += 1;     acq.consecutiveFailures += 1; }
 
-  // Use Exponential Moving Average (EMA) for current success rate so it drifts quickly
+  // EMA keeps currentSuccessRate responsive to recent outcomes
   if (acq.totalTransactions === 1) {
     acq.currentSuccessRate = success ? 1 : 0;
   } else {

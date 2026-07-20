@@ -4,6 +4,7 @@ import { getSocket } from '../services/socket';
 
 export default function Acquirers() {
   const [acquirers, setAcquirers] = useState([]);
+  const [actionMessage, setActionMessage] = useState(null);
 
   useEffect(() => {
     getAcquirers().then(setAcquirers).catch(console.error);
@@ -11,6 +12,11 @@ export default function Acquirers() {
     socket.on('acquirer:update', setAcquirers);
     return () => socket.off('acquirer:update');
   }, []);
+
+  function showMessage(msg, type = 'info') {
+    setActionMessage({ text: msg, type });
+    setTimeout(() => setActionMessage(null), 3500);
+  }
 
   return (
     <div className="admin-main">
@@ -20,6 +26,20 @@ export default function Acquirers() {
           <p>Ödeme sağlayıcılarının gerçek zamanlı durumları</p>
         </div>
       </div>
+
+      {actionMessage && (
+        <div style={{
+          marginBottom: 16,
+          padding: '10px 16px',
+          borderRadius: 8,
+          background: actionMessage.type === 'warn' ? 'rgba(234, 179, 8, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+          border: `1px solid ${actionMessage.type === 'warn' ? 'rgba(234,179,8,0.4)' : 'rgba(59,130,246,0.4)'}`,
+          color: actionMessage.type === 'warn' ? 'var(--yellow)' : 'var(--cyan)',
+          fontSize: '0.85rem',
+        }}>
+          {actionMessage.text}
+        </div>
+      )}
 
       <div className="acquirer-grid">
         {acquirers.map((acq) => {
@@ -40,7 +60,6 @@ export default function Acquirers() {
                 <div className={`acq-badge ${badgeClass}`}>{badgeText}</div>
               </div>
 
-              {/* Success rate */}
               <div className="acq-metric">
                 <div className="acq-metric-label">Başarı Oranı</div>
                 <div className="acq-metric-row">
@@ -54,7 +73,6 @@ export default function Acquirers() {
                 </div>
               </div>
 
-              {/* Response time */}
               <div className="acq-metric" style={{ marginTop: 16 }}>
                 <div className="acq-metric-label">Gecikme (ms)</div>
                 <div className="acq-metric-row">
@@ -74,7 +92,7 @@ export default function Acquirers() {
                   <div className="acq-stat-box-value">{acq.totalTransactions.toLocaleString()}</div>
                 </div>
                 <div className="acq-stat-box">
-                  <div className="acq-stat-box-label">Hata (Consecutive)</div>
+                  <div className="acq-stat-box-label">Ardışık Hata</div>
                   <div className="acq-stat-box-value" style={{ color: acq.consecutiveFailures > 3 ? 'var(--red)' : 'inherit' }}>
                     {acq.consecutiveFailures}
                   </div>
@@ -82,16 +100,27 @@ export default function Acquirers() {
               </div>
 
               <div className="acq-stats-row">
-                 <div className="acq-stat-box">
+                <div className="acq-stat-box">
                   <div className="acq-stat-box-label">Yönlendirme Ağırlığı</div>
                   <div className="acq-stat-box-value">{acq.routingWeight.toFixed(1)}x</div>
                 </div>
               </div>
 
-              {/* Dummy Admin Controls */}
               <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)', display: 'flex', gap: 8, justifyContent: 'space-between' }}>
-                <button className="btn btn-ghost" style={{ fontSize: '0.75rem', padding: '4px 8px' }} onClick={() => alert('Yönlendirme ağırlığı değiştiriliyor (Admin yetkisi gerektirir)...')}>⚙️ Ayarlar</button>
-                <button className="btn btn-ghost" style={{ fontSize: '0.75rem', padding: '4px 8px', color: 'var(--red)' }} onClick={() => alert('Acquirer kapatılıyor (Sistem yöneticisi onayı bekleniyor)...')}>⛔ Kapat</button>
+                <button
+                  className="btn btn-ghost"
+                  style={{ fontSize: '0.75rem', padding: '4px 8px' }}
+                  onClick={() => showMessage(`${acq.name} ayarları Agent AI üzerinden yönetilir. "Agent AI" sekmesinden komut verebilirsiniz.`, 'info')}
+                >
+                  Ayarlar
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  style={{ fontSize: '0.75rem', padding: '4px 8px', color: 'var(--red)' }}
+                  onClick={() => showMessage(`Kapatma işlemi Agent AI tarafından anomali tespitinde otomatik gerçekleştirilir. Manuel için "Agent AI" sekmesinden komut verebilirsiniz.`, 'warn')}
+                >
+                  Kapat
+                </button>
               </div>
             </div>
           );
