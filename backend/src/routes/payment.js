@@ -68,6 +68,18 @@ router.post('/', async (req, res, next) => {
       }
     }
 
+    // ── Calculate and persist savings if successful
+    let currentSavings = 0;
+    if (paymentResult.success && routingResult.costSavingPct > 0) {
+      const savingAmount = amount * (routingResult.costSavingPct / 100);
+      await db.run(`UPDATE system_metrics SET total_savings = total_savings + ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1`, savingAmount);
+      const row = await db.get(`SELECT total_savings FROM system_metrics WHERE id = 1`);
+      if (row) {
+        currentSavings = row.total_savings;
+        if (_io) _io.emit('metrics:savings_update', { totalSavings: currentSavings, latestSaving: savingAmount });
+      }
+    }
+
     // ── WebSocket
     const payload = { id: transactionId, cardBin, cardType, amount, currency,
       acquirerId: paymentResult.acquirerId, status, errorCode: errorDef?.code || null,

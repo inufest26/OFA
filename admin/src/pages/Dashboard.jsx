@@ -30,22 +30,57 @@ export default function Dashboard() {
     });
     socket.on('acquirer:update', (data) => setAcquirers(data));
     socket.on('agent:escalation', (esc) => setEscalations((prev) => [esc, ...prev]));
+    socket.on('metrics:savings_update', (data) => {
+      setMetrics((m) => m ? { ...m, totalSavings: data.totalSavings } : null);
+    });
 
     return () => {
       socket.off('transaction:new');
       socket.off('acquirer:update');
       socket.off('agent:escalation');
+      socket.off('metrics:savings_update');
     };
   }, []);
 
   return (
     <div className="admin-main">
-      <div className="page-header">
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1>Dashboard</h1>
           <p>Sistem geneli metrikler ve gerçek zamanlı izleme</p>
         </div>
+        
+        {metrics && (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(16, 185, 129, 0.2))',
+            border: '1px solid rgba(34, 197, 94, 0.3)',
+            borderRadius: '12px',
+            padding: '12px 24px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-end',
+            boxShadow: '0 4px 20px rgba(34, 197, 94, 0.15)',
+            position: 'relative',
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              position: 'absolute', top: '-50%', left: '-50%', width: '200%', height: '200%',
+              background: 'radial-gradient(circle, rgba(34,197,94,0.1) 0%, transparent 70%)',
+              animation: 'spin 10s linear infinite', zIndex: 0
+            }} />
+            <div style={{ fontSize: '0.85rem', color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600, zIndex: 1 }}>
+              ML Yönlendirme Tasarrufu
+            </div>
+            <div style={{ fontSize: '2rem', fontWeight: 800, color: '#fff', textShadow: '0 2px 10px rgba(34,197,94,0.3)', zIndex: 1 }}>
+              ₺{metrics.totalSavings?.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+            </div>
+          </div>
+        )}
       </div>
+
+      <style>{`
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+      `}</style>
 
       <NotificationBanner
         escalations={escalations}

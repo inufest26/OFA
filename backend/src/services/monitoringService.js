@@ -1,11 +1,12 @@
 
 const { getDb } = require('../database/init');
-const { getAllAcquirers } = require('./acquirerSimulator');
+const { getAllAcquirers, setPredictiveRisk } = require('./acquirerSimulator');
 const logger = require('../utils/logger');
 
 const WINDOW_MINUTES = 5;
 const SNAPSHOT_INTERVAL_MS = 5_000;
 const ANOMALY_SUCCESS_THRESHOLD = 0.50;
+const PREDICTIVE_RISK_THRESHOLD = 0.75;
 const ANOMALY_CONSEC_FAILURES = 3;
 
 let _io = null;
@@ -67,6 +68,7 @@ async function monitoringTick() {
     await saveSnapshot(acq.id, metrics);
     const anomalies = [];
     const consec = acq.consecutiveFailures;
+    let isPredictiveRisk = false;
 
     if (consec >= ANOMALY_CONSEC_FAILURES) {
       anomalies.push({
@@ -76,11 +78,19 @@ async function monitoringTick() {
     }
 
     if (metrics.total >= 1) {
-      if (metrics.successRate !== null && metrics.successRate < ANOMALY_SUCCESS_THRESHOLD) {
-        anomalies.push({
-          type: 'düşük_başarı_oranı',
-          detail: `Başarı oranı ${(metrics.successRate * 100).toFixed(1)}% (< ${(ANOMALY_SUCCESS_THRESHOLD * 100)}%)`,
-        });
+      if (metrics.successRate !== null) {
+        if (metrics.successRate < ANOMALY_SUCCESS_THRESHOLD) {
+          anomalies.push({
+            type: 'düşük_başarı_oranı',
+            detail: `Başarı oranı ${(metrics.successRate * 100).toFixed(1)}% (< ${(ANOMALY_SUCCESS_THRESHOLD * 100)}%)`,
+          });
+        } else if (metrics.successRate < PREDICTIVE_RISK_THRESHOLD && consec >= 1) {
+          isPredictiveRisk = true;
+          anomalies.push({
+            type: 'tahmini_ariza',
+            detail: `Başarı oranında ani düşüş eğilimi (${(metrics.successRate * 100).toFixed(1)}%). Olası arıza tahmini.`,
+          });
+        }
       }
       if (metrics.avgResponseTime > 0 && acq.avgResponseTime > 0 &&
           metrics.avgResponseTime > acq.avgResponseTime * 2) {
@@ -106,6 +116,9 @@ async function monitoringTick() {
         }
       }
     }
+    
+    // Update predictive risk state in the simulator
+    setPredictiveRisk(acq.id, isPredictiveRisk);
   }
   broadcastAcquirerStates();
 }
@@ -147,9 +160,11 @@ async function getDashboardMetrics() {
   const { c: success }      = await db.get("SELECT COUNT(*) AS c FROM transactions WHERE status='success'");
   const { c: openIncidents }= await db.get("SELECT COUNT(*) AS c FROM incidents WHERE status='open'");
   const { c: openEscalations } = await db.get('SELECT COUNT(*) AS c FROM escalations WHERE acknowledged=0');
+  const row = await db.get('SELECT total_savings FROM system_metrics WHERE id = 1');
+  const totalSavings = row ? row.total_savings : 0;
   const active = getAllAcquirers().filter((a) => a.isActive).length;
   return { totalTransactions: total, successRate: total > 0 ? success / total : 0,
-    activeAcquirers: active, openIncidents, openEscalations };
+    activeAcquirers: active, openIncidents, openEscalations, totalSavings };
 }
 
 module.exports = { startMonitoring, stopMonitoring, setSocketIo, setAgentService,

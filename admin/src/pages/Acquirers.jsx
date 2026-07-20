@@ -49,6 +49,8 @@ export default function Acquirers() {
             badgeClass = 'isolated'; badgeText = 'Isolated'; cardClass = 'isolated';
           } else if (acq.anomalyMode) {
             badgeClass = 'critical'; badgeText = 'Anomaly'; cardClass = 'anomaly';
+          } else if (acq.predictiveRisk) {
+            badgeClass = 'warning'; badgeText = 'Forecast: Riskli 📉'; cardClass = 'degraded';
           } else if (acq.currentSuccessRate < 0.9) {
             badgeClass = 'warning'; badgeText = 'Degraded';
           }

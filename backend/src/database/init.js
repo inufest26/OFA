@@ -188,6 +188,12 @@ async function initDb() {
       created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS system_metrics (
+      id INTEGER PRIMARY KEY,
+      total_savings REAL NOT NULL DEFAULT 0,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tx_created    ON transactions(created_at);
     CREATE INDEX IF NOT EXISTS idx_tx_acquirer   ON transactions(acquirer_id);
     CREATE INDEX IF NOT EXISTS idx_tx_status     ON transactions(status);
@@ -211,6 +217,9 @@ async function initDb() {
       id, name, base, current, rt, weight
     );
   }
+
+  // ── Seed system metrics ───────────────────────────────────────────────────
+  await _db.run(`INSERT OR IGNORE INTO system_metrics (id, total_savings) VALUES (1, 0)`);
 
   logger.info('Database initialised successfully');
   return _db;
