@@ -25,7 +25,12 @@ export default function LiveFeed({ transactions }) {
       {transactions.slice(0, 15).map((tx) => (
         <div key={tx.id} className="feed-item">
           <span className={`feed-status ${tx.status}`} />
-          <span className="feed-id">{(tx.id || tx.transactionId || '').slice(0, 8)}</span>
+          <span className="feed-id">
+            {(tx.id || tx.transactionId || '').slice(0, 8)}
+            {tx.source === 'simulator' && (
+              <span className="badge" style={{ marginLeft: 6, fontSize: '0.65rem', background: 'var(--surface2)', color: 'var(--muted)' }}>BOT</span>
+            )}
+          </span>
           <span className="feed-type">{ACQUIRER_NAMES[tx.acquirerId || tx.acquirer_id] || '—'}</span>
           <span className="feed-acq">
             <span className={`badge ${tx.status}`}>{tx.status}</span>

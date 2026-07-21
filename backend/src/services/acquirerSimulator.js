@@ -34,26 +34,28 @@ const acquirerState = {
 };
 
 // Drift base success rates and response times every 30s to simulate real-world fluctuations.
-// 1% chance of a severe outage per tick; otherwise gentle random drift.
+// Periodic drift: small, natural fluctuations. Severe outages are very rare.
 setInterval(() => {
   for (const key of Object.keys(acquirerState)) {
     const acq = acquirerState[key];
-    
-    if (Math.random() < 0.01) {
-      acq.baseSuccessRate = Math.max(0.1, acq.baseSuccessRate - 0.4);
-      acq.avgResponseTime = Math.min(2000, acq.avgResponseTime + 500);
-      logger.warn(`Sudden network degradation detected for ${acq.name}!`);
+    if (!acq.isActive) continue; // don't drift isolated acquirers
+
+    // 0.2% chance of a sudden degradation per tick (was 1% — way too frequent for demos)
+    if (Math.random() < 0.002) {
+      acq.baseSuccessRate = Math.max(0.30, acq.baseSuccessRate - 0.25);
+      acq.avgResponseTime = Math.min(1500, acq.avgResponseTime + 300);
+      logger.warn(`Sudden degradation simulated for ${acq.name}`);
     } else {
-      const driftRate = (Math.random() * 0.1) - 0.05;
-      acq.baseSuccessRate = Math.min(0.99, Math.max(0.20, acq.baseSuccessRate + driftRate));
-      
-      const driftTime = (Math.random() * 60) - 30;
-      acq.avgResponseTime = Math.min(1000, Math.max(100, acq.avgResponseTime + driftTime));
+      // Gentle ±2% drift (was ±5% — too volatile)
+      const driftRate = (Math.random() * 0.04) - 0.02;
+      acq.baseSuccessRate = Math.min(0.99, Math.max(0.70, acq.baseSuccessRate + driftRate));
+
+      const driftTime = (Math.random() * 40) - 20;
+      acq.avgResponseTime = Math.min(800, Math.max(100, acq.avgResponseTime + driftTime));
     }
-    
-    // EMA decay toward base rate so the UI updates even without incoming traffic
+
+    // EMA decay toward base rate
     acq.currentSuccessRate = acq.currentSuccessRate * 0.8 + acq.baseSuccessRate * 0.2;
-    
     persistState(acq).catch(() => {});
   }
 }, 30000);

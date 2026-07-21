@@ -332,7 +332,7 @@ IMPORTANT: All your internal reasoning (final_conclusion) and user-facing report
 Do NOT output English. Always respond in Turkish.
 
 CRITICAL RULES:
-- You MUST call at least one tool (e.g., query_logs, get_acquirer_status) before making ANY decisions.
+- If the root cause is clear from the initial prompt metrics, you can directly take action (e.g., isolate_acquirer) and call 'conclude_investigation'. You do not have to call query logs if it's unnecessary.
 - Eğer anomali bir acquirer hatası değil de belirli bir üye işyeri (merchant) hatasıysa, bu sizin otonom yetkiniz dışındadır. Merchant sorunlarını KESİNLİKLE "escalate_to_admin" aracı ile admin'e raporlamalısınız.
 - You must FINALLY call the 'conclude_investigation' tool to finish the investigation. Do NOT output plain text conclusions, ALWAYS use 'conclude_investigation'.
 
@@ -374,7 +374,7 @@ KRİTİK TALİMAT: İlk olarak 'query_transaction_logs' veya 'get_error_distribu
     let iteration = 0;
     let finalStatus = 'resolved';
 
-    while (iteration < 12) {
+    while (iteration < 5) {
       iteration++;
       const respObj = response.response || response;
       const content = respObj.candidates?.[0]?.content;
@@ -400,15 +400,6 @@ KRİTİK TALİMAT: İlk olarak 'query_transaction_logs' veya 'get_error_distribu
         const { name, args } = part.functionCall;
         
         if (name === 'conclude_investigation') {
-          // Force at least 2 data tool calls before allowing conclusion
-          const dataCalls = reasoningChain.filter(s => s.type === 'tool_call').length;
-          if (dataCalls < 2) {
-            // Tell AI it must investigate more first
-            toolResults.push({ functionResponse: { name, response: { result: {
-              error: "Too early to conclude. You MUST call at least 2 data tools (query_transaction_logs, get_acquirer_metrics, get_error_distribution, or get_all_acquirer_statuses) before concluding. Please investigate first."
-            }}}});
-            continue;
-          }
           const conclusionStep = { type: 'conclusion', text: args.final_conclusion || 'Investigation complete.', timestamp: new Date().toISOString() };
           reasoningChain.push(conclusionStep);
           if (_io) _io.emit('agent:step', { incidentId, step: conclusionStep });
@@ -447,7 +438,22 @@ KRİTİK TALİMAT: İlk olarak 'query_transaction_logs' veya 'get_error_distribu
     if (_io) _io.emit('agent:incident', { incidentId, acquirerId, status: finalStatus });
   } catch (err) {
     logger.error('Agent investigation error', { acquirerId, error: err.message });
-    await db.run("UPDATE incidents SET status='open' WHERE id=?", incidentId).catch(() => {});
+    await db.run("UPDATE incidents SET status='open', root_cause='Agent API hatası nedeniyle inceleme tamamlanamadı.' WHERE id=?", incidentId).catch(() => {});
+    
+    // Create an escalation for the failure
+    try {
+      const { lastInsertRowid: escalationId } = await db.run(
+        `INSERT INTO escalations (title,severity,description,attempted_actions,recommendation)
+         VALUES (?,'high',?,?,'Sistemi manuel olarak kontrol edin ve Gemini API limitlerini gözden geçirin.')`,
+        `Yapay Zeka Çevrimdışı: ${acquirerId}`,
+        `Agent inceleme yaparken bir hata oluştu: ${err.message}`,
+        JSON.stringify(["Otomatik soruşturma başlatıldı", "Gemini API çağrısı başarısız oldu"])
+      );
+      const escalation = await db.get('SELECT * FROM escalations WHERE id=?', escalationId);
+      if (_io) _io.emit('agent:escalation', escalation);
+    } catch (e) {
+      logger.error('Failed to create fallback escalation', { error: e.message });
+    }
   } finally {
     activeInvestigations.delete(acquirerId);
   }

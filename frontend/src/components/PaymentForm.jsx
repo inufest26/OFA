@@ -2,15 +2,12 @@ import React, { useState } from 'react';
 import CardPreview from './CardPreview';
 import { processPayment } from '../services/api';
 
-// ── Luhn algorithm for card number generation ────────────────────────────────
 function luhnChecksum(num) {
-  let sum = 0;
-  let alt = false;
+  let sum = 0, alt = false;
   for (let i = num.length - 1; i >= 0; i--) {
     let n = parseInt(num[i], 10);
     if (alt) { n *= 2; if (n > 9) n -= 9; }
-    sum += n;
-    alt = !alt;
+    sum += n; alt = !alt;
   }
   return sum % 10;
 }
@@ -31,17 +28,14 @@ function generateExpiry() {
   return `${month}/${year}`;
 }
 
-function generateCVV() {
-  return String(Math.floor(100 + Math.random() * 900));
-}
+function generateCVV() { return String(Math.floor(100 + Math.random() * 900)); }
 
-// ── Demo scenario special card numbers ───────────────────────────────────────
 const DEMO_SCENARIOS = [
-  { label: '🟢 Her Zaman Başarılı',   cardPrefix: '4111', type: 'visa',       desc: 'Başarılı işlem' },
-  { label: '🟡 Riskli İşlem',          cardPrefix: '5222', type: 'mastercard', desc: '%70 başarı' },
-  { label: '🔴 Bakiye Yetersiz',       cardPrefix: '9792', type: 'troy',       desc: 'E001 hatası' },
-  { label: '⏱️ Timeout → Retry',       cardPrefix: '4000', type: 'visa',       desc: 'Retry tetikler' },
-  { label: '🤖 Anomali Tetikle',       cardPrefix: '5333', type: 'mastercard', desc: 'Agent devreye girer' },
+  { label: 'Başarılı İşlem Senaryosu', cardPrefix: '4111', type: 'visa', dot: '#10b981' },
+  { label: 'Riskli İşlem (Yüksek Ret İhtimali)', cardPrefix: '5222', type: 'mastercard', dot: '#a1a1aa' },
+  { label: 'Yetersiz Bakiye Simülasyonu', cardPrefix: '9792', type: 'troy', dot: '#ef4444' },
+  { label: 'Zaman Aşımı ve Retry', cardPrefix: '4000', type: 'visa', dot: '#f59e0b' },
+  { label: 'Anomali ve Agent Devreye Girme', cardPrefix: '5333', type: 'mastercard', dot: '#3b82f6' },
 ];
 
 const AMOUNT_PRESETS = [50, 100, 250, 500];
@@ -61,10 +55,7 @@ export default function PaymentForm({ onResult }) {
   const activeAmount = amount || customAmount;
 
   function handleTypeSelect(t) {
-    setCardType(t);
-    setCardNumber('');
-    setExpiry('');
-    setCvv('');
+    setCardType(t); setCardNumber(''); setExpiry(''); setCvv('');
   }
 
   function handleGenerate() {
@@ -74,59 +65,40 @@ export default function PaymentForm({ onResult }) {
       setExpiry(generateExpiry());
       setCvv(generateCVV());
       setGenerating(false);
-    }, 400);
+    }, 300);
   }
+
   function handleDemoScenario(scenario) {
     setCardType(scenario.type);
     const rest = '0000000000'.slice(0, 12 - scenario.cardPrefix.length);
     setCardNumber(scenario.cardPrefix + rest);
-    setExpiry('12/28');
-    setCvv('123');
-    setAmount('100');
-    setCustomAmount('');
+    setExpiry('12/28'); setCvv('123'); setAmount('100'); setCustomAmount('');
   }
+
   async function handleSubmit(e) {
     e.preventDefault();
     const finalAmount = parseFloat(activeAmount);
     if (!cardNumber || !expiry || !cvv || !finalAmount) {
-      setError('Lütfen tüm alanları doldurun.');
-      return;
+      setError('Lütfen tüm alanları doldurun.'); return;
     }
-    setError('');
-    setLoading(true);
+    setError(''); setLoading(true);
     try {
-      const result = await processPayment({
-        cardNumber,
-        cardType,
-        amount: finalAmount,
-        currency: 'TRY',
-      });
+      const result = await processPayment({ cardNumber, cardType, amount: finalAmount, currency: 'TRY' });
       onResult(result);
     } catch (err) {
-      setError(err?.response?.data?.error || 'Sunucu hatası. Tekrar deneyin.');
-    } finally {
-      setLoading(false);
-    }
+      setError(err?.response?.data?.error || 'Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.');
+    } finally { setLoading(false); }
   }
 
   return (
-    <form onSubmit={handleSubmit}>
-      {/* ── Card Preview ─────────────────────────────────────────────────── */}
-      <CardPreview
-        cardType={cardType}
-        cardNumber={cardNumber}
-        expiry={expiry}
-        generating={generating}
-      />
+    <form onSubmit={handleSubmit} className="fade-in">
+      <CardPreview cardType={cardType} cardNumber={cardNumber} expiry={expiry} generating={generating} />
 
-      {/* ── Card Type ─────────────────────────────────────────────────────── */}
       <div className="form-section">
         <label>Kart Tipi</label>
         <div className="select-grid">
           {CARD_TYPES.map((t) => (
-            <button
-              key={t}
-              type="button"
+            <button key={t} type="button"
               className={`type-btn ${cardType === t ? 'active' : ''}`}
               onClick={() => handleTypeSelect(t)}
             >
@@ -136,20 +108,15 @@ export default function PaymentForm({ onResult }) {
         </div>
       </div>
 
-      {/* ── Generate button ───────────────────────────────────────────────── */}
       <button type="button" className="gen-btn" onClick={handleGenerate} disabled={generating}>
-        {generating ? <span className="spinner" /> : '⟳'}
-        {generating ? 'Üretiliyor…' : 'Rastgele Kart Üret'}
+        {generating ? 'Kart Üretiliyor...' : 'Rastgele Kart Üret'}
       </button>
 
-      {/* ── Amount ────────────────────────────────────────────────────────── */}
       <div className="form-section">
         <label>Tutar (₺)</label>
         <div className="amount-grid">
           {AMOUNT_PRESETS.map((a) => (
-            <button
-              key={a}
-              type="button"
+            <button key={a} type="button"
               className={`amount-btn ${amount === String(a) ? 'active' : ''}`}
               onClick={() => { setAmount(String(a)); setCustomAmount(''); }}
             >
@@ -157,54 +124,38 @@ export default function PaymentForm({ onResult }) {
             </button>
           ))}
         </div>
-        <input
-          className="input"
-          type="number"
-          placeholder="Özel tutar girin…"
-          min="1"
-          value={customAmount}
+        <input className="input" type="number" placeholder="Özel tutar girin"
+          min="1" value={customAmount}
           onChange={(e) => { setCustomAmount(e.target.value); setAmount(''); }}
         />
       </div>
 
-      {/* ── Demo scenarios ────────────────────────────────────────────────── */}
-      <div className="divider">Demo Senaryoları</div>
+      <div className="demo-section-title">Test Senaryoları</div>
       <div className="demo-grid">
         {DEMO_SCENARIOS.map((s) => (
-          <button
-            key={s.label}
-            type="button"
-            className="demo-btn"
+          <button key={s.label} type="button" className="demo-btn"
             onClick={() => handleDemoScenario(s)}
-            title={s.desc}
           >
+            <span style={{
+              display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
+              background: s.dot, marginRight: 12, flexShrink: 0
+            }} />
             {s.label}
           </button>
         ))}
       </div>
 
-      {/* ── Error ─────────────────────────────────────────────────────────── */}
       {error && (
-        <p style={{ color: 'var(--red)', fontSize: '0.83rem', marginTop: 16, textAlign: 'center' }}>
+        <p style={{ color: 'var(--red)', fontSize: '0.85rem', marginTop: 24, textAlign: 'center' }}>
           {error}
         </p>
       )}
 
-      {/* ── Pay ───────────────────────────────────────────────────────────── */}
-      <button
-        type="submit"
-        className="pay-btn"
+      <button type="submit" className="pay-btn"
         disabled={loading || !cardNumber || !activeAmount}
-        style={{ marginTop: 20 }}
         id="pay-button"
       >
-        {loading ? (
-          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-            <span className="spinner" /> İşleniyor…
-          </span>
-        ) : (
-          `Ödeme Yap${activeAmount ? ` — ₺${parseFloat(activeAmount).toLocaleString('tr-TR')}` : ''}`
-        )}
+        {loading ? 'İşleniyor...' : `Ödemeyi Tamamla${activeAmount ? ` ₺${parseFloat(activeAmount).toLocaleString('tr-TR')}` : ''}`}
       </button>
     </form>
   );

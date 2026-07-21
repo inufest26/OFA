@@ -17,7 +17,15 @@ export default function PaymentResult({ result, onBack }) {
     <div className="result fade-in">
       {/* ── Icon ──────────────────────────────────────────────────────────── */}
       <div className={`result-icon ${success ? 'success' : 'fail'}`}>
-        {success ? '✓' : '✕'}
+        {success ? (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20,6 9,17 4,12"/>
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        )}
       </div>
 
       {/* ── Title ─────────────────────────────────────────────────────────── */}
@@ -40,14 +48,14 @@ export default function PaymentResult({ result, onBack }) {
       {/* ── ML Badge ─────────────────────────────────────────────────────── */}
       {topAcquirer && (
         <div className="ml-badge">
-          🤖 ML — En yüksek skor: {ACQUIRER_NAMES[topAcquirer[0]] || topAcquirer[0]} ({(topAcquirer[1] * 100).toFixed(1)}%)
+          ML — En yüksek skor: {ACQUIRER_NAMES[topAcquirer[0]] || topAcquirer[0]} ({(topAcquirer[1] * 100).toFixed(1)}%)
         </div>
       )}
 
       {/* ── Cost Saving Badge ────────────────────────────────────────────── */}
       {success && costSavingPct > 0 && (
         <div className="ml-badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: 'var(--green)', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
-          💡 Maliyet Tasarrufu: %{costSavingPct} daha ucuz oran ({ACQUIRER_NAMES[acquirerId] || acquirerId} seçildi)
+          Maliyet Tasarrufu: %{costSavingPct} daha ucuz oran · {ACQUIRER_NAMES[acquirerId] || acquirerId} seçildi
         </div>
       )}
 
@@ -70,7 +78,7 @@ export default function PaymentResult({ result, onBack }) {
         <div className="detail-row">
           <span className="label">Durum</span>
           <span className={`value ${success ? 'green' : 'red'}`}>
-            {success ? '✓ Onaylandı' : error?.code ? `✕ ${error.code}` : '✕ Reddedildi'}
+            {success ? 'Onaylandı' : error?.code ? error.code : 'Reddedildi'}
           </span>
         </div>
         {retryCount > 0 && (
@@ -103,7 +111,7 @@ export default function PaymentResult({ result, onBack }) {
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '2px' }}>{reason}</div>
                   </div>
                   <div style={{ fontSize: '0.8rem', color: r.success ? 'var(--green)' : 'var(--red)' }}>
-                    {r.success ? '✓' : '✕'}
+                    {r.success ? '✓' : '✗'}
                   </div>
                 </div>
               );
@@ -143,7 +151,7 @@ export default function PaymentResult({ result, onBack }) {
 
       {/* ── Back ──────────────────────────────────────────────────────────── */}
       <button className="back-btn" onClick={onBack} id="back-button">
-        ← Yeni Ödeme
+        Yeni Ödeme
       </button>
     </div>
   );

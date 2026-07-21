@@ -5,14 +5,20 @@ const logger = require('../utils/logger');
 
 const WINDOW_MINUTES = 5;
 const SNAPSHOT_INTERVAL_MS = 5_000;
-const ANOMALY_SUCCESS_THRESHOLD = 0.50;
-const PREDICTIVE_RISK_THRESHOLD = 0.75;
-const ANOMALY_CONSEC_FAILURES = 3;
+// Anomaly = success rate drops below 40% AND at least 15 transactions in window
+const ANOMALY_SUCCESS_THRESHOLD = 0.40;
+// Predictive risk = success rate between 40-68% AND 4+ consecutive failures
+const PREDICTIVE_RISK_THRESHOLD = 0.68;
+// Need at least 7 back-to-back failures to consider it a real anomaly
+const ANOMALY_CONSEC_FAILURES = 7;
+// Minimum transactions in the window before success rate is considered meaningful
+const ANOMALY_MIN_TRANSACTIONS = 15;
 
 let _io = null;
 let _agentService = null;
-const lastInvestigatedAt = new Map(); // acquirerId -> timestamp
-const INVESTIGATION_COOLDOWN_MS = 60_000; // 60 seconds between investigations per acquirer
+const lastInvestigatedAt = new Map();
+// 3 minutes between agent investigations per acquirer — avoid spamming Gemini
+const INVESTIGATION_COOLDOWN_MS = 180_000;
 let _monitorTimer = null;
 
 function setSocketIo(io) { _io = io; }
@@ -33,15 +39,19 @@ async function collectWindowMetrics(acquirerId, windowMinutes = WINDOW_MINUTES) 
     successRate: total > 0 ? successful / total : null, avgResponseTime };
 }
 
-async function saveSnapshot(acquirerId, metrics) {
+async function saveSnapshot(acquirerId, metrics, acqState) {
   const db = getDb();
   const now   = new Date().toISOString();
   const since = new Date(Date.now() - WINDOW_MINUTES * 60 * 1000).toISOString();
+  
+  // If there's no traffic, use the simulator's internal state so the chart looks alive
+  const rate = metrics.successRate !== null ? metrics.successRate : (acqState ? acqState.currentSuccessRate : 1);
+
   await db.run(
     `INSERT INTO metric_snapshots
        (acquirer_id, success_rate, avg_response_time, transaction_count, error_count, period_start, period_end)
      VALUES (?,?,?,?,?,?,?)`,
-    acquirerId, metrics.successRate ?? 1, metrics.avgResponseTime,
+    acquirerId, rate, metrics.avgResponseTime,
     metrics.total, metrics.failed, since, now
   );
 }
@@ -65,7 +75,7 @@ async function monitoringTick() {
   const acquirers = getAllAcquirers();
   for (const acq of acquirers) {
     const metrics = await collectWindowMetrics(acq.id);
-    await saveSnapshot(acq.id, metrics);
+    await saveSnapshot(acq.id, metrics, acq);
     const anomalies = [];
     const consec = acq.consecutiveFailures;
     let isPredictiveRisk = false;
@@ -77,26 +87,29 @@ async function monitoringTick() {
       });
     }
 
-    if (metrics.total >= 1) {
+    // Only evaluate success rate if we have a meaningful sample size in the window
+    if (metrics.total >= ANOMALY_MIN_TRANSACTIONS) {
       if (metrics.successRate !== null) {
         if (metrics.successRate < ANOMALY_SUCCESS_THRESHOLD) {
           anomalies.push({
             type: 'düşük_başarı_oranı',
             detail: `Başarı oranı ${(metrics.successRate * 100).toFixed(1)}% (< ${(ANOMALY_SUCCESS_THRESHOLD * 100)}%)`,
           });
-        } else if (metrics.successRate < PREDICTIVE_RISK_THRESHOLD && consec >= 1) {
+        } else if (metrics.successRate < PREDICTIVE_RISK_THRESHOLD && consec >= 4) {
+          // Predictive risk: declining trend with multiple consecutive failures
           isPredictiveRisk = true;
           anomalies.push({
             type: 'tahmini_ariza',
-            detail: `Başarı oranında ani düşüş eğilimi (${(metrics.successRate * 100).toFixed(1)}%). Olası arıza tahmini.`,
+            detail: `Başarı oranında düşüş eğilimi (${(metrics.successRate * 100).toFixed(1)}%), ${consec} ardışık hata. Olası arıza tahmini.`,
           });
         }
       }
+      // Response time spike: only flag if significantly elevated
       if (metrics.avgResponseTime > 0 && acq.avgResponseTime > 0 &&
-          metrics.avgResponseTime > acq.avgResponseTime * 2) {
+          metrics.avgResponseTime > acq.avgResponseTime * 2.5) {
         anomalies.push({
           type: 'yüksek_yanıt_süresi',
-          detail: `Ortalama yanıt süresi ${metrics.avgResponseTime.toFixed(0)}ms (> 2× normal değer)`,
+          detail: `Ortalama yanıt süresi ${metrics.avgResponseTime.toFixed(0)}ms (> 2.5× normal değer)`,
         });
       }
     }
@@ -134,17 +147,29 @@ function startMonitoring() {
 }
 
 async function checkIsolatedAcquirers() {
+  const now = Date.now();
   const acquirers = getAllAcquirers();
+
   for (const acq of acquirers) {
-    if (!acq.isActive && acq.isolatedAt && acq.baseSuccessRate > 0.85 && _agentService) {
-      logger.info(`Self-healing check: ${acq.id} looks healthy, asking agent to evaluate.`);
-      const anomalies = [{ type: 'iyileşme_tespit_edildi', detail: 'Sistem sağlıklı görünüyor.' }];
-      const metrics = { total: 10, successRate: acq.baseSuccessRate, failed: 0, avgResponseTime: acq.avgResponseTime };
-      const lastTime = lastInvestigatedAt.get(acq.id) || 0;
-      if (Date.now() - lastTime > INVESTIGATION_COOLDOWN_MS) {
-        lastInvestigatedAt.set(acq.id, Date.now());
-        _agentService.investigate(acq.id, anomalies, metrics, true)
-          .catch((e) => logger.error('Agent recovery failed', { error: e.message }));
+    if (!acq.isActive && acq.isolatedAt && _agentService) {
+      const isolatedAt = new Date(acq.isolatedAt).getTime();
+      if (now - isolatedAt < 5 * 60 * 1000) continue; // wait at least 5 min before self-heal check
+
+      // ✔ Use REAL measured metrics from the DB window — not hardcoded values
+      const realMetrics = await collectWindowMetrics(acq.id);
+
+      // Only consider self-healing if success rate is genuinely recovering
+      // AND we have enough data points (at least 5 transactions routed through shadow mode)
+      const readyToRestore = acq.baseSuccessRate > 0.85 && realMetrics.total >= 5 && (realMetrics.successRate === null || realMetrics.successRate > 0.80);
+
+      if (readyToRestore) {
+        logger.info(`Self-heal check: ${acq.id} looks healthy, asking agent to evaluate`, {
+          baseSuccessRate: acq.baseSuccessRate,
+          windowMetrics: realMetrics,
+        });
+        const anomalies = [{ type: 'iyileşme_tespiti', detail: `${acq.id} izolasyondan çıkmaya hazır. Gerçek pencere başarı oranı: ${realMetrics.successRate !== null ? (realMetrics.successRate * 100).toFixed(1) + '%' : 'N/A'} (${realMetrics.total} işlem)` }];
+        _agentService.investigate(acq.id, anomalies, realMetrics, true)
+          .catch((e) => logger.error('Self-heal investigation failed', { error: e.message }));
       }
     }
   }

@@ -28,7 +28,7 @@ async function postPayment(cardNumber, cardType, amount) {
     await fetch(`http://localhost:${port}/api/payment`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cardNumber, cardType, amount, currency: 'TRY' }),
+      body: JSON.stringify({ cardNumber, cardType, amount, currency: 'TRY', source: 'simulator' }),
     });
   } catch (err) {
     logger.warn('Traffic simulator failed to send request', { error: err.message });

@@ -111,6 +111,7 @@ async function initDb() {
       retry_count     INTEGER NOT NULL DEFAULT 0,
       retry_history   TEXT,
       ml_scores       TEXT,
+      source          TEXT NOT NULL DEFAULT 'real',
       created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
