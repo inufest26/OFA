@@ -6,12 +6,15 @@ const ACQUIRER_NAMES = {
   acquirer_garanti:   'Garanti',
   acquirer_yapikredi: 'Yapı Kredi',
   acquirer_isbank:    'İş Bankası',
+  acquirer_akbank:    'Akbank',
+  acquirer_qnb:       'QNB Finansbank',
+  acquirer_denizbank: 'DenizBank',
 };
 
-const STATUS_NAMES = {
-  open: 'açık',
-  resolved: 'çözüldü',
-  escalated: 'iletildi'
+const STATUS_ICONS = {
+  open: '🔴',
+  resolved: '✅',
+  escalated: '⚠️'
 };
 
 const TOOL_LABELS = {
@@ -211,8 +214,8 @@ export default function Agent() {
               onClick={() => loadIncidentDetail(inc.id)}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <div className="incident-item-title">{inc.title}</div>
-                <div className={`badge ${inc.status}`}>{STATUS_NAMES[inc.status] || inc.status}</div>
+                <div className="incident-item-title">{inc.title.replace(inc.acquirer_id, ACQUIRER_NAMES[inc.acquirer_id] || inc.acquirer_id)}</div>
+                <div style={{ fontSize: '1.2rem', lineHeight: 1 }}>{STATUS_ICONS[inc.status] || '❓'}</div>
               </div>
               <div className="incident-item-meta">
                 {ACQUIRER_NAMES[inc.acquirer_id] || inc.acquirer_id} • {new Date(inc.created_at).toLocaleTimeString('tr-TR')}
@@ -231,7 +234,7 @@ export default function Agent() {
                   <button className="btn btn-ghost" style={{ padding: '8px 12px', fontSize: '0.85rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: '6px', cursor: 'pointer' }} onClick={handleBackToChat}>
                     ← Chat'e Dön
                   </button>
-                  <h2 style={{ fontSize: '1.2rem' }}>{activeIncident.title}</h2>
+                  <h2 style={{ fontSize: '1.2rem' }}>{activeIncident.title.replace(activeIncident.acquirer_id, ACQUIRER_NAMES[activeIncident.acquirer_id] || activeIncident.acquirer_id)}</h2>
                   <div style={{ color: 'var(--muted)', fontSize: '0.85rem', marginTop: 4 }}>
                     Acquirer: {ACQUIRER_NAMES[activeIncident.acquirer_id]} • {new Date(activeIncident.created_at).toLocaleString('tr-TR')}
                     {agentRunning && <span style={{ marginLeft: 12, color: '#f59e0b', fontWeight: 'bold' }}>● Canlı Analiz</span>}

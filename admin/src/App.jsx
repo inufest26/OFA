@@ -9,6 +9,8 @@ import Agent from './pages/Agent';
 import Login from './pages/Login';
 import { getSocket } from './services/socket';
 
+import GlobalToast from './components/GlobalToast';
+
 function ProtectedRoute() {
   const token = localStorage.getItem('token');
   if (!token) return <Navigate to="/login" replace />;
@@ -28,6 +30,7 @@ function ProtectedRoute() {
 
   return (
     <div className="admin-layout">
+      <GlobalToast />
       <Sidebar wsConnected={wsConnected} />
       <Outlet />
     </div>

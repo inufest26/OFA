@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import CardPreview from './CardPreview';
 import { processPayment } from '../services/api';
+import api from '../services/api';
 
 function luhnChecksum(num) {
   let sum = 0, alt = false;
@@ -41,6 +42,16 @@ const DEMO_SCENARIOS = [
 const AMOUNT_PRESETS = [50, 100, 250, 500];
 const CARD_TYPES = ['visa', 'mastercard', 'troy'];
 
+// Fallback list in case API is unavailable
+const FALLBACK_ACQUIRERS = [
+  { id: 'acquirer_garanti',   name: 'Garanti Sanal POS' },
+  { id: 'acquirer_yapikredi', name: 'Yapı Kredi Sanal POS' },
+  { id: 'acquirer_isbank',    name: 'İş Bankası Sanal POS' },
+  { id: 'acquirer_akbank',    name: 'Akbank Sanal POS' },
+  { id: 'acquirer_qnb',       name: 'QNB Finansbank Sanal POS' },
+  { id: 'acquirer_denizbank', name: 'DenizBank Sanal POS' },
+];
+
 export default function PaymentForm({ onResult }) {
   const [cardType, setCardType] = useState('visa');
   const [cardNumber, setCardNumber] = useState('');
@@ -51,8 +62,21 @@ export default function PaymentForm({ onResult }) {
   const [generating, setGenerating] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [acquirers, setAcquirers] = useState(FALLBACK_ACQUIRERS);
+  const [selectedAcquirerId, setSelectedAcquirerId] = useState('acquirer_garanti');
 
   const activeAmount = amount || customAmount;
+
+  // Load acquirers from API for real-time success rates
+  useEffect(() => {
+    api.get('/api/metrics/acquirers')
+      .then(({ data }) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setAcquirers(data);
+        }
+      })
+      .catch(() => { /* use fallback */ });
+  }, []);
 
   function handleTypeSelect(t) {
     setCardType(t); setCardNumber(''); setExpiry(''); setCvv('');
@@ -90,9 +114,33 @@ export default function PaymentForm({ onResult }) {
     } finally { setLoading(false); }
   }
 
+  async function handleInstantAgentTest() {
+    setLoading(true);
+    setError('Agent test başlatılıyor... (Arka arkaya hatalı işlemler gönderiliyor)');
+    try {
+      for (let i = 0; i < 8; i++) {
+        try {
+          await processPayment({ cardNumber: '5333000000000000', cardType: 'mastercard', amount: 100, currency: 'TRY' });
+        } catch (e) {
+          // ignore rejection, we want rejections
+        }
+      }
+      setError('Test işlemleri gönderildi! Birkaç saniye içinde Agent (OFA) devreye girecektir.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <form onSubmit={handleSubmit} className="fade-in">
-      <CardPreview cardType={cardType} cardNumber={cardNumber} expiry={expiry} generating={generating} />
+      {/* Card preview now shows acquirer-specific colors */}
+      <CardPreview
+        cardType={cardType}
+        cardNumber={cardNumber}
+        expiry={expiry}
+        generating={generating}
+        acquirerId={selectedAcquirerId}
+      />
 
       <div className="form-section">
         <label>Kart Tipi</label>
@@ -103,6 +151,27 @@ export default function PaymentForm({ onResult }) {
               onClick={() => handleTypeSelect(t)}
             >
               {t.charAt(0).toUpperCase() + t.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Acquirer selector — each acquirer changes the card color */}
+      <div className="form-section">
+        <label>Ödeme Altyapısı</label>
+        <div className="acquirer-grid">
+          {acquirers.map((acq) => (
+            <button
+              key={acq.id}
+              type="button"
+              className={`acquirer-btn ${acq.id} ${selectedAcquirerId === acq.id ? 'active' : ''}`}
+              onClick={() => setSelectedAcquirerId(acq.id)}
+            >
+              <span className="acquirer-dot" />
+              <span className="acquirer-name">{acq.name}</span>
+              {acq.currentSuccessRate != null && (
+                <span className="acquirer-rate">%{(acq.currentSuccessRate * 100).toFixed(0)}</span>
+              )}
             </button>
           ))}
         </div>
@@ -145,8 +214,14 @@ export default function PaymentForm({ onResult }) {
         ))}
       </div>
 
+      <div style={{ marginTop: 12 }}>
+        <button type="button" className="demo-btn" style={{ width: '100%', justifyContent: 'center' }} onClick={handleInstantAgentTest} disabled={loading}>
+          Tek Hamlede OFA Testi Başlat
+        </button>
+      </div>
+
       {error && (
-        <p style={{ color: 'var(--red)', fontSize: '0.85rem', marginTop: 24, textAlign: 'center' }}>
+        <p style={{ color: error.includes('başlatılıyor') || error.includes('gönderildi') ? 'var(--blue)' : 'var(--red)', fontSize: '0.85rem', marginTop: 24, textAlign: 'center' }}>
           {error}
         </p>
       )}

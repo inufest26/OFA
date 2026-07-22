@@ -13,42 +13,64 @@ const acquirerState = {
   acquirer_garanti: {
     id: 'acquirer_garanti', name: 'Garanti Sanal POS',
     isActive: true, routingWeight: 1.0, commissionRate: 0.015,
-    baseSuccessRate: 0.94, currentSuccessRate: 0.94, avgResponseTime: 230,
+    baseSuccessRate: 0.97, currentSuccessRate: 0.97, avgResponseTime: 230,
     anomalyMode: false, predictiveRisk: false, totalTransactions: 0, successfulTransactions: 0,
     failedTransactions: 0, consecutiveFailures: 0, isolatedAt: null, isolationReason: null,
   },
   acquirer_yapikredi: {
     id: 'acquirer_yapikredi', name: 'Yapı Kredi Sanal POS',
     isActive: true, routingWeight: 1.0, commissionRate: 0.017,
-    baseSuccessRate: 0.91, currentSuccessRate: 0.91, avgResponseTime: 310,
+    baseSuccessRate: 0.96, currentSuccessRate: 0.96, avgResponseTime: 310,
     anomalyMode: false, predictiveRisk: false, totalTransactions: 0, successfulTransactions: 0,
     failedTransactions: 0, consecutiveFailures: 0, isolatedAt: null, isolationReason: null,
   },
   acquirer_isbank: {
     id: 'acquirer_isbank', name: 'İş Bankası Sanal POS',
     isActive: true, routingWeight: 1.0, commissionRate: 0.019,
-    baseSuccessRate: 0.88, currentSuccessRate: 0.88, avgResponseTime: 280,
+    baseSuccessRate: 0.95, currentSuccessRate: 0.95, avgResponseTime: 280,
+    anomalyMode: false, predictiveRisk: false, totalTransactions: 0, successfulTransactions: 0,
+    failedTransactions: 0, consecutiveFailures: 0, isolatedAt: null, isolationReason: null,
+  },
+  // ── 3 New Acquirers ──────────────────────────────────────────────────────────
+  acquirer_akbank: {
+    id: 'acquirer_akbank', name: 'Akbank Sanal POS',
+    isActive: true, routingWeight: 1.0, commissionRate: 0.016,
+    baseSuccessRate: 0.96, currentSuccessRate: 0.96, avgResponseTime: 250,
+    anomalyMode: false, predictiveRisk: false, totalTransactions: 0, successfulTransactions: 0,
+    failedTransactions: 0, consecutiveFailures: 0, isolatedAt: null, isolationReason: null,
+  },
+  acquirer_qnb: {
+    id: 'acquirer_qnb', name: 'QNB Finansbank Sanal POS',
+    isActive: true, routingWeight: 1.0, commissionRate: 0.018,
+    baseSuccessRate: 0.93, currentSuccessRate: 0.93, avgResponseTime: 290,
+    anomalyMode: false, predictiveRisk: false, totalTransactions: 0, successfulTransactions: 0,
+    failedTransactions: 0, consecutiveFailures: 0, isolatedAt: null, isolationReason: null,
+  },
+  acquirer_denizbank: {
+    id: 'acquirer_denizbank', name: 'DenizBank Sanal POS',
+    isActive: true, routingWeight: 1.0, commissionRate: 0.020,
+    baseSuccessRate: 0.94, currentSuccessRate: 0.94, avgResponseTime: 270,
     anomalyMode: false, predictiveRisk: false, totalTransactions: 0, successfulTransactions: 0,
     failedTransactions: 0, consecutiveFailures: 0, isolatedAt: null, isolationReason: null,
   },
 };
 
 // Drift base success rates and response times every 30s to simulate real-world fluctuations.
-// Periodic drift: small, natural fluctuations. Severe outages are very rare.
+// Reduced sudden degradation probability to 0.05% (was 0.2%) for lower error rates.
 setInterval(() => {
   for (const key of Object.keys(acquirerState)) {
     const acq = acquirerState[key];
     if (!acq.isActive) continue; // don't drift isolated acquirers
 
-    // 0.2% chance of a sudden degradation per tick (was 1% — way too frequent for demos)
-    if (Math.random() < 0.002) {
+    // 0.05% chance of a sudden degradation per tick (was 0.2% — still too frequent)
+    if (Math.random() < 0.0005) {
       acq.baseSuccessRate = Math.max(0.30, acq.baseSuccessRate - 0.25);
       acq.avgResponseTime = Math.min(1500, acq.avgResponseTime + 300);
       logger.warn(`Sudden degradation simulated for ${acq.name}`);
     } else {
-      // Gentle ±2% drift (was ±5% — too volatile)
-      const driftRate = (Math.random() * 0.04) - 0.02;
-      acq.baseSuccessRate = Math.min(0.99, Math.max(0.70, acq.baseSuccessRate + driftRate));
+      // Gentle ±1.5% drift (was ±2%)
+      const driftRate = (Math.random() * 0.03) - 0.015;
+      acq.baseSuccessRate = Math.min(0.99, Math.max(0.80, acq.baseSuccessRate + driftRate));
 
       const driftTime = (Math.random() * 40) - 20;
       acq.avgResponseTime = Math.min(800, Math.max(100, acq.avgResponseTime + driftTime));

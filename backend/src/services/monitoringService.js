@@ -5,21 +5,29 @@ const logger = require('../utils/logger');
 
 const WINDOW_MINUTES = 5;
 const SNAPSHOT_INTERVAL_MS = 5_000;
-// Anomaly = success rate drops below 40% AND at least 15 transactions in window
-const ANOMALY_SUCCESS_THRESHOLD = 0.40;
-// Predictive risk = success rate between 40-68% AND 4+ consecutive failures
-const PREDICTIVE_RISK_THRESHOLD = 0.68;
-// Need at least 7 back-to-back failures to consider it a real anomaly
-const ANOMALY_CONSEC_FAILURES = 7;
+// Anomaly = success rate drops below 80% AND at least 3 transactions in window
+const ANOMALY_SUCCESS_THRESHOLD = 0.80;
+// Predictive risk = success rate between 80-90% AND 3+ consecutive failures
+const PREDICTIVE_RISK_THRESHOLD = 0.90;
+// Need at least 3 back-to-back failures to consider it a real anomaly
+const ANOMALY_CONSEC_FAILURES = 3;
 // Minimum transactions in the window before success rate is considered meaningful
-const ANOMALY_MIN_TRANSACTIONS = 15;
+const ANOMALY_MIN_TRANSACTIONS = 3;
 
 let _io = null;
 let _agentService = null;
 const lastInvestigatedAt = new Map();
-// 3 minutes between agent investigations per acquirer — avoid spamming Gemini
-const INVESTIGATION_COOLDOWN_MS = 180_000;
+// 1 minute between agent investigations per acquirer — avoid spamming Gemini with 503s
+const INVESTIGATION_COOLDOWN_MS = 60_000;
 let _monitorTimer = null;
+
+// ── Anomaly batch buffer ──────────────────────────────────────────────────────
+// Instead of triggering AI on every anomaly tick, we collect anomalies here
+// and flush them as a single batched AI call every BATCH_FLUSH_INTERVAL_MS.
+// This dramatically reduces the number of Gemini API calls and avoids 503 rate limits.
+const pendingAnomalies = new Map(); // acquirerId → { anomalies[], metrics, detectedAt }
+const BATCH_FLUSH_INTERVAL_MS = 15_000; // flush every 15 seconds
+let _batchTimer = null;
 
 function setSocketIo(io) { _io = io; }
 function setAgentService(svc) { _agentService = svc; }
@@ -71,6 +79,31 @@ function broadcastAcquirerStates() {
   _io.emit('acquirer:update', getAllAcquirers());
 }
 
+// ── Batch flush: send collected anomalies to AI as a single call ──────────────
+async function flushPendingAnomalies() {
+  if (!_agentService || pendingAnomalies.size === 0) return;
+
+  const entries = Array.from(pendingAnomalies.entries());
+  pendingAnomalies.clear(); // clear buffer before async work to avoid double-flush
+
+  for (const [acquirerId, { anomalies, metrics }] of entries) {
+    const lastTime = lastInvestigatedAt.get(acquirerId) || 0;
+    const cooldownOk = Date.now() - lastTime > INVESTIGATION_COOLDOWN_MS;
+    if (!cooldownOk) {
+      logger.info('Investigation cooldown active, skipping batched anomaly', {
+        acquirerId,
+        remainingSec: Math.round((INVESTIGATION_COOLDOWN_MS - (Date.now() - lastTime)) / 1000),
+      });
+      continue;
+    }
+
+    logger.info(`Flushing batched anomalies to AI for ${acquirerId}`, { anomalyCount: anomalies.length });
+    lastInvestigatedAt.set(acquirerId, Date.now());
+    _agentService.investigate(acquirerId, anomalies, metrics)
+      .catch((e) => logger.error('Agent investigation (batched) failed', { error: e.message }));
+  }
+}
+
 async function monitoringTick() {
   const acquirers = getAllAcquirers();
   for (const acq of acquirers) {
@@ -115,18 +148,21 @@ async function monitoringTick() {
     }
 
     if (anomalies.length > 0) {
-      logger.warn('Anomaly detected', { acquirerId: acq.id, anomalies });
+      logger.warn('Anomaly detected — queuing for batch AI flush', { acquirerId: acq.id, anomalies });
       if (_io) _io.emit('acquirer:anomaly', { acquirerId: acq.id, anomalies, metrics });
-      if (_agentService) {
-        const lastTime = lastInvestigatedAt.get(acq.id) || 0;
-        const cooldownOk = Date.now() - lastTime > INVESTIGATION_COOLDOWN_MS;
-        if (cooldownOk) {
-          lastInvestigatedAt.set(acq.id, Date.now());
-          _agentService.investigate(acq.id, anomalies, metrics)
-            .catch((e) => logger.error('Agent investigation failed', { error: e.message }));
-        } else {
-          logger.info('Investigation cooldown active, skipping', { acquirerId: acq.id, remainingSec: Math.round((INVESTIGATION_COOLDOWN_MS - (Date.now() - lastTime)) / 1000) });
-        }
+
+      // ── BATCH: accumulate anomalies, don't call AI immediately ──────────
+      // If this acquirer already has pending anomalies, merge them.
+      // The latest metrics snapshot is used (most up-to-date).
+      if (pendingAnomalies.has(acq.id)) {
+        const existing = pendingAnomalies.get(acq.id);
+        // Deduplicate anomaly types to keep the buffer clean
+        const existingTypes = new Set(existing.anomalies.map((a) => a.type));
+        const newAnomalies = anomalies.filter((a) => !existingTypes.has(a.type));
+        existing.anomalies.push(...newAnomalies);
+        existing.metrics = metrics; // update to latest
+      } else {
+        pendingAnomalies.set(acq.id, { anomalies: [...anomalies], metrics, detectedAt: Date.now() });
       }
     }
     
@@ -138,11 +174,17 @@ async function monitoringTick() {
 
 function startMonitoring() {
   if (_monitorTimer) return;
-  logger.info(`Monitoring started (interval: ${SNAPSHOT_INTERVAL_MS / 1000}s)`);
+  logger.info(`Monitoring started (snapshot: ${SNAPSHOT_INTERVAL_MS / 1000}s, AI flush: ${BATCH_FLUSH_INTERVAL_MS / 1000}s)`);
   _monitorTimer = setInterval(() => {
     monitoringTick().catch((e) => logger.error('Monitoring tick failed', { error: e.message }));
     checkIsolatedAcquirers().catch((e) => logger.error('Health check failed', { error: e.message }));
   }, SNAPSHOT_INTERVAL_MS);
+
+  // Batch AI flush timer — runs much less frequently than monitoring tick
+  _batchTimer = setInterval(() => {
+    flushPendingAnomalies().catch((e) => logger.error('Batch flush failed', { error: e.message }));
+  }, BATCH_FLUSH_INTERVAL_MS);
+
   monitoringTick().catch((e) => logger.error('Initial monitoring tick failed', { error: e.message, stack: e.stack }));
 }
 
@@ -163,11 +205,16 @@ async function checkIsolatedAcquirers() {
       const readyToRestore = acq.baseSuccessRate > 0.85 && realMetrics.total >= 5 && (realMetrics.successRate === null || realMetrics.successRate > 0.80);
 
       if (readyToRestore) {
+        const lastTime = lastInvestigatedAt.get(acq.id) || 0;
+        const cooldownOk = Date.now() - lastTime > INVESTIGATION_COOLDOWN_MS;
+        if (!cooldownOk) continue; // respect cooldown for self-heal too
+
         logger.info(`Self-heal check: ${acq.id} looks healthy, asking agent to evaluate`, {
           baseSuccessRate: acq.baseSuccessRate,
           windowMetrics: realMetrics,
         });
         const anomalies = [{ type: 'iyileşme_tespiti', detail: `${acq.id} izolasyondan çıkmaya hazır. Gerçek pencere başarı oranı: ${realMetrics.successRate !== null ? (realMetrics.successRate * 100).toFixed(1) + '%' : 'N/A'} (${realMetrics.total} işlem)` }];
+        lastInvestigatedAt.set(acq.id, Date.now());
         _agentService.investigate(acq.id, anomalies, realMetrics, true)
           .catch((e) => logger.error('Self-heal investigation failed', { error: e.message }));
       }
@@ -177,6 +224,7 @@ async function checkIsolatedAcquirers() {
 
 function stopMonitoring() {
   if (_monitorTimer) { clearInterval(_monitorTimer); _monitorTimer = null; }
+  if (_batchTimer)   { clearInterval(_batchTimer);   _batchTimer = null;   }
 }
 
 async function getDashboardMetrics() {

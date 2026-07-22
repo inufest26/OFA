@@ -88,15 +88,47 @@ html, body, #root {
   box-shadow: var(--shadow-soft);
 }
 
-/* Minimalist Card Backgrounds */
+/* Minimalist Card Backgrounds — card type fallbacks */
 .cc.visa {
-  background: #18181b;
+  background: linear-gradient(135deg, #18181b 0%, #27272a 100%);
 }
 .cc.mastercard {
-  background: #27272a;
+  background: linear-gradient(135deg, #27272a 0%, #3f3f46 100%);
 }
 .cc.troy {
-  background: #1c1917;
+  background: linear-gradient(135deg, #1c1917 0%, #292524 100%);
+}
+
+/* ── Acquirer-specific card gradients ─────────────────────────────────────── */
+/* Garanti — signature green */
+.cc.garanti {
+  background: linear-gradient(135deg, #064e3b 0%, #065f46 40%, #047857 100%);
+  box-shadow: 0 20px 60px rgba(4, 120, 87, 0.3);
+}
+/* Yapı Kredi — deep navy blue */
+.cc.yapikredi {
+  background: linear-gradient(135deg, #1e3a5f 0%, #1d4ed8 60%, #1e40af 100%);
+  box-shadow: 0 20px 60px rgba(30, 64, 175, 0.3);
+}
+/* İş Bankası — steel blue */
+.cc.isbank {
+  background: linear-gradient(135deg, #0c2340 0%, #1d3557 50%, #155e75 100%);
+  box-shadow: 0 20px 60px rgba(21, 94, 117, 0.3);
+}
+/* Akbank — corporate red */
+.cc.akbank {
+  background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 40%, #b91c1c 100%);
+  box-shadow: 0 20px 60px rgba(185, 28, 28, 0.3);
+}
+/* QNB Finansbank — royal purple */
+.cc.qnb {
+  background: linear-gradient(135deg, #3b0764 0%, #6d28d9 50%, #7c3aed 100%);
+  box-shadow: 0 20px 60px rgba(109, 40, 217, 0.3);
+}
+/* DenizBank — ocean teal */
+.cc.denizbank {
+  background: linear-gradient(135deg, #0f4c75 0%, #0369a1 50%, #0284c7 100%);
+  box-shadow: 0 20px 60px rgba(3, 105, 161, 0.3);
 }
 
 /* Subtle shine instead of heavy gradients */
@@ -352,3 +384,71 @@ html, body, #root {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* ── Acquirer selector grid ── */
+.acquirer-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.acquirer-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  font-family: var(--font);
+  position: relative;
+  overflow: hidden;
+}
+.acquirer-btn:hover { background: var(--surface2); color: var(--text); }
+.acquirer-btn.active {
+  border-color: var(--border2);
+  background: var(--surface2);
+  color: var(--text);
+}
+
+/* Colored dot per acquirer */
+.acquirer-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+.acquirer-btn.active .acquirer-dot { transform: scale(1.4); }
+
+.acquirer-btn.acquirer_garanti   .acquirer-dot { background: #047857; }
+.acquirer-btn.acquirer_yapikredi .acquirer-dot { background: #1d4ed8; }
+.acquirer-btn.acquirer_isbank    .acquirer-dot { background: #155e75; }
+.acquirer-btn.acquirer_akbank    .acquirer-dot { background: #b91c1c; }
+.acquirer-btn.acquirer_qnb       .acquirer-dot { background: #7c3aed; }
+.acquirer-btn.acquirer_denizbank .acquirer-dot { background: #0284c7; }
+
+/* Active state border matches acquirer color */
+.acquirer-btn.active.acquirer_garanti   { border-color: #047857; box-shadow: 0 0 0 1px #04785740; }
+.acquirer-btn.active.acquirer_yapikredi { border-color: #1d4ed8; box-shadow: 0 0 0 1px #1d4ed840; }
+.acquirer-btn.active.acquirer_isbank    { border-color: #155e75; box-shadow: 0 0 0 1px #155e7540; }
+.acquirer-btn.active.acquirer_akbank    { border-color: #b91c1c; box-shadow: 0 0 0 1px #b91c1c40; }
+.acquirer-btn.active.acquirer_qnb       { border-color: #7c3aed; box-shadow: 0 0 0 1px #7c3aed40; }
+.acquirer-btn.active.acquirer_denizbank { border-color: #0284c7; box-shadow: 0 0 0 1px #0284c740; }
+
+.acquirer-name { flex: 1; }
+.acquirer-rate {
+  font-size: 0.72rem;
+  color: var(--green);
+  font-weight: 600;
+  background: rgba(16, 185, 129, 0.1);
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+

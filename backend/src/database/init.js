@@ -205,9 +205,12 @@ async function initDb() {
 
   // ── Seed acquirers ────────────────────────────────────────────────────────
   const acquirers = [
-    ['acquirer_garanti',   'Garanti Sanal POS',     0.94, 0.94, 230, 1.0],
-    ['acquirer_yapikredi', 'Yapı Kredi Sanal POS',  0.91, 0.91, 310, 1.0],
-    ['acquirer_isbank',    'İş Bankası Sanal POS',  0.88, 0.88, 280, 1.0],
+    ['acquirer_garanti',    'Garanti Sanal POS',          0.97, 0.97, 230, 1.0],
+    ['acquirer_yapikredi',  'Yapı Kredi Sanal POS',       0.96, 0.96, 310, 1.0],
+    ['acquirer_isbank',     'İş Bankası Sanal POS',       0.95, 0.95, 280, 1.0],
+    ['acquirer_akbank',     'Akbank Sanal POS',           0.96, 0.96, 250, 1.0],
+    ['acquirer_qnb',        'QNB Finansbank Sanal POS',   0.93, 0.93, 290, 1.0],
+    ['acquirer_denizbank',  'DenizBank Sanal POS',        0.94, 0.94, 270, 1.0],
   ];
 
   for (const [id, name, base, current, rt, weight] of acquirers) {

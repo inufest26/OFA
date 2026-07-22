@@ -126,9 +126,12 @@ class MLRouter {
 
     // Card-type affinity per acquirer (demo values)
     const cardAffinity = {
-      acquirer_garanti:   { visa: 0.9, mastercard: 0.85, troy: 0.7 },
-      acquirer_yapikredi: { visa: 0.8, mastercard: 0.9,  troy: 0.75 },
-      acquirer_isbank:    { visa: 0.75, mastercard: 0.8, troy: 0.95 },
+      acquirer_garanti:   { visa: 0.90, mastercard: 0.85, troy: 0.70 },
+      acquirer_yapikredi: { visa: 0.80, mastercard: 0.90, troy: 0.75 },
+      acquirer_isbank:    { visa: 0.75, mastercard: 0.80, troy: 0.95 },
+      acquirer_akbank:    { visa: 0.92, mastercard: 0.88, troy: 0.80 },
+      acquirer_qnb:       { visa: 0.85, mastercard: 0.92, troy: 0.72 },
+      acquirer_denizbank: { visa: 0.78, mastercard: 0.82, troy: 0.88 },
     };
 
     // Time-of-day bonus (peak hours 9-18 = higher traffic = lower bonus)

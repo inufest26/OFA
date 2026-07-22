@@ -5,6 +5,9 @@ const ACQUIRER_NAMES = {
   acquirer_garanti:   'Garanti',
   acquirer_yapikredi: 'Yapı Kredi',
   acquirer_isbank:    'İş Bankası',
+  acquirer_akbank:    'Akbank',
+  acquirer_qnb:       'QNB Finansbank',
+  acquirer_denizbank: 'DenizBank',
 };
 
 export default function Logs() {

@@ -2,7 +2,8 @@ const logger = require('../utils/logger');
 
 const CARD_TYPES = ['visa', 'mastercard', 'troy'];
 const CARD_PREFIXES = { visa: '4532', mastercard: '5425', troy: '9793' };
-const AMOUNTS = [50, 100, 250, 500, 1000, 2500];
+// Reduced amounts to keep transaction rate lower
+const AMOUNTS = [50, 100, 250, 500, 1000];
 
 let _trafficInterval = null;
 let _isRunning = false;
@@ -38,16 +39,19 @@ async function postPayment(cardNumber, cardType, amount) {
 async function normalTrafficTick() {
   if (!_isRunning) return;
 
-  // 5% risky, 3% timeout, rest normal — creates organic mixed traffic
+  // Drastically reduced error injection rates to get ~2 failures per 5 minutes:
+  // - 1% risky cards (was 5%)
+  // - 0.5% timeout cards (was 3%)
+  // - rest normal (high success rate cards)
   const roll = Math.random();
   let cardNumber, cardType;
 
-  if (roll < 0.05) {
+  if (roll < 0.01) {
     cardType = CARD_TYPES[Math.floor(Math.random() * CARD_TYPES.length)];
-    cardNumber = '5222' + randomDigits(12); // risky
-  } else if (roll < 0.08) {
+    cardNumber = '5222' + randomDigits(12); // risky (was 5%)
+  } else if (roll < 0.015) {
     cardType = 'visa';
-    cardNumber = '4000' + randomDigits(12); // timeout → retry
+    cardNumber = '4000' + randomDigits(12); // timeout → retry (was 3%)
   } else {
     const card = randomCard();
     cardNumber = card.cardNumber;
@@ -66,7 +70,8 @@ async function anomalyTick() {
 
 function scheduleAnomaly() {
   if (!_isRunning) return;
-  const delay = 120_000 + Math.random() * 60_000; // every 2–3 minutes
+  // Every 8–10 minutes (was 2–3 minutes) — much less frequent anomaly injection
+  const delay = 480_000 + Math.random() * 120_000;
   setTimeout(async () => {
     await anomalyTick().catch(() => {});
     scheduleAnomaly();
@@ -76,17 +81,18 @@ function scheduleAnomaly() {
 function start() {
   if (_isRunning) return;
   _isRunning = true;
+  // Interval: 2.5 seconds → ~120 transactions per 5 min
   _trafficInterval = setInterval(() => {
     normalTrafficTick().catch(() => {});
-  }, 3000);
+  }, 2500);
 
-  // First anomaly after 45s, then recurring every 2-3 minutes
+  // First anomaly after 90s, then recurring every 8-10 minutes
   setTimeout(async () => {
     await anomalyTick().catch(() => {});
     scheduleAnomaly();
-  }, 45_000);
+  }, 90_000);
 
-  logger.info('Traffic Simulator started — normal: 3s interval, anomaly: ~2-3min cycle');
+  logger.info('Traffic Simulator started — normal: 2.5s interval, anomaly: ~8-10min cycle');
 }
 
 function stop() {

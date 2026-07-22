@@ -3,7 +3,6 @@ import { getMetrics, getAcquirers, getEscalations, getTransactions } from '../se
 import { getSocket } from '../services/socket';
 import StatsCard from '../components/StatsCard';
 import LiveFeed from '../components/LiveFeed';
-import NotificationBanner from '../components/NotificationBanner';
 import SuccessRateChart from '../components/SuccessRateChart';
 
 const IconCredit = (
@@ -88,11 +87,6 @@ export default function Dashboard() {
         )}
       </div>
 
-      <NotificationBanner
-        escalations={escalations}
-        onAck={(id) => setEscalations((p) => p.filter((e) => e.id !== id))}
-      />
-
       <div className="stats-grid">
         <StatsCard
           icon={IconCredit}
@@ -158,7 +152,7 @@ export default function Dashboard() {
 
         <div className="card">
           <div className="section-title">Son İşlemler</div>
-          <LiveFeed transactions={txs} />
+          <LiveFeed transactions={txs.slice(0, 8)} />
         </div>
       </div>
     </div>

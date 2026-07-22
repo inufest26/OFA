@@ -28,6 +28,12 @@ router.post('/', async (req, res, next) => {
     // ── ML routing
     const routingResult = await mlRouter.predict({ cardNumber, cardType, amount, currency });
     if (!routingResult.selectedAcquirer) {
+      const db = getDb();
+      await db.run(
+        `INSERT INTO error_logs (transaction_id,acquirer_id,error_code,error_message,retry_attempted)
+         VALUES (?,?,?,?,?)`,
+        transactionId, 'system', 'E000', 'No active acquirers available', 0
+      );
       return res.status(503).json({ error: 'No active acquirers available' });
     }
 

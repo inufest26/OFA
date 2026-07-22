@@ -198,32 +198,77 @@ html, body, #root {
   margin-top: 4px;
 }
 
-/* ── Escalation banner ── */
-.escalation-banner {
+/* ── Global Toast Notifications ── */
+.global-toast-container {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+.global-toast {
+  width: 320px;
   background: var(--surface);
   border-radius: var(--radius-lg);
-  padding: 20px 24px;
-  margin-bottom: 32px;
-  display: flex; align-items: flex-start; gap: 16px;
+  padding: 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  pointer-events: auto;
+  border-left: 4px solid var(--border);
+  position: relative;
 }
-.escalation-icon { width: 24px; height: 24px; background: rgba(239,68,68,0.1); color: var(--red); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.escalation-icon svg { width: 14px; height: 14px; }
-.escalation-body { flex: 1; }
-.escalation-title { font-weight: 600; font-size: 0.9rem; color: var(--text); }
-.escalation-desc  { font-size: 0.85rem; color: var(--muted); margin-top: 6px; line-height: 1.5; }
-.ack-btn {
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 8px 16px;
-  color: var(--text);
+
+.global-toast.toast-error { border-left-color: var(--red); }
+.global-toast.toast-info  { border-left-color: var(--blue); }
+
+.toast-icon {
+  font-size: 1.2rem;
+  background: var(--surface2);
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.toast-content { flex: 1; min-width: 0; }
+.toast-title {
   font-size: 0.85rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-  margin-top: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.ack-btn:hover { background: var(--surface2); }
+.toast-desc {
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.toast-close {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.toast-close:hover { color: var(--text); }
+
+.fade-in-toast {
+  animation: toastFadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes toastFadeIn {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
 
 /* ── Live feed ── */
 .live-feed { display: flex; flex-direction: column; }
@@ -396,13 +441,34 @@ tr { cursor: default; transition: background 0.15s; }
 .incident-item {
   background: var(--surface);
   border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 16px 20px;
-  cursor: pointer; transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
 }
-.incident-item:hover { border-color: var(--muted); transform: translateX(4px); }
-.incident-item.active { border-color: var(--text); background: var(--surface2); }
-.incident-item-title { font-size: 0.95rem; font-weight: 600; color: var(--text); margin-bottom: 8px; line-height: 1.4; }
+.incident-item::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0) 100%);
+  pointer-events: none;
+}
+.incident-item:hover {
+  border-color: var(--muted);
+  transform: translateX(4px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+.incident-item.active {
+  border-color: var(--border2);
+  background: var(--surface2);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+.incident-item:has(.badge.open) { border-left-color: var(--red); }
+.incident-item:has(.badge.resolved) { border-left-color: var(--green); }
+.incident-item:has(.badge.escalated) { border-left-color: var(--yellow); }
+
+.incident-item-title { font-size: 0.95rem; font-weight: 600; color: var(--text); margin-bottom: 8px; line-height: 1.4; padding-right: 8px; }
 .incident-item-meta { font-size: 0.8rem; color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
 
 .incident-detail {
@@ -449,8 +515,4 @@ tr { cursor: default; transition: background 0.15s; }
 .chat-send-btn:hover:not(:disabled) { background: #fff; transform: translateY(-1px); }
 .chat-send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* ── Notification Banner Fix ── */
-.escalation-desc {
-  font-size: 0.9rem; color: var(--muted); margin-top: 8px; line-height: 1.6;
-  white-space: pre-wrap; word-break: break-word;
-}
+/* escalation-desc styles are in the carousel section above */

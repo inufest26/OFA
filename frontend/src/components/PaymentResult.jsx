@@ -4,6 +4,9 @@ const ACQUIRER_NAMES = {
   acquirer_garanti:   'Garanti Sanal POS',
   acquirer_yapikredi: 'Yapı Kredi Sanal POS',
   acquirer_isbank:    'İş Bankası Sanal POS',
+  acquirer_akbank:    'Akbank Sanal POS',
+  acquirer_qnb:       'QNB Finansbank Sanal POS',
+  acquirer_denizbank: 'DenizBank Sanal POS',
 };
 
 export default function PaymentResult({ result, onBack }) {
