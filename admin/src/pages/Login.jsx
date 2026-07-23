@@ -28,7 +28,7 @@ export default function Login() {
       <div className="login-card">
         <div className="login-logo">
           <h1><span>Otonom Finans Asistanı</span> (OFA)</h1>
-          <p>Admin Dashboard</p>
+          <p>Yönetim Paneli</p>
         </div>
         <form onSubmit={handleSubmit}>
           <div className="login-field">

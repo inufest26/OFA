@@ -70,8 +70,8 @@ async function anomalyTick() {
 
 function scheduleAnomaly() {
   if (!_isRunning) return;
-  // Every 8–10 minutes (was 2–3 minutes) — much less frequent anomaly injection
-  const delay = 480_000 + Math.random() * 120_000;
+  // Every 15–20 minutes — much less frequent anomaly injection
+  const delay = 900_000 + Math.random() * 300_000;
   setTimeout(async () => {
     await anomalyTick().catch(() => {});
     scheduleAnomaly();
@@ -86,11 +86,11 @@ function start() {
     normalTrafficTick().catch(() => {});
   }, 2500);
 
-  // First anomaly after 90s, then recurring every 8-10 minutes
+  // First anomaly after 5 minutes, then recurring every 15-20 minutes
   setTimeout(async () => {
     await anomalyTick().catch(() => {});
     scheduleAnomaly();
-  }, 90_000);
+  }, 300_000);
 
   logger.info('Traffic Simulator started — normal: 2.5s interval, anomaly: ~8-10min cycle');
 }
@@ -103,4 +103,8 @@ function stop() {
   logger.info('Traffic Simulator stopped');
 }
 
-module.exports = { start, stop };
+function isRunning() {
+  return _isRunning;
+}
+
+module.exports = { start, stop, isRunning };

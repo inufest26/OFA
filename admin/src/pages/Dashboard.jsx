@@ -120,10 +120,10 @@ export default function Dashboard() {
               const rate = acq.currentSuccessRate;
               const rateColor = rate > 0.9 ? 'var(--text)' : rate > 0.7 ? 'var(--yellow)' : 'var(--red)';
               let status = 'Normal';
-              if (!acq.isActive) status = 'Isolated';
-              else if (acq.anomalyMode) status = 'Anomaly';
-              else if (acq.predictiveRisk) status = 'Risk';
-              else if (rate < 0.9) status = 'Degraded';
+              if (!acq.isActive) status = 'İzole';
+              else if (acq.anomalyMode) status = 'Anomali';
+              else if (acq.predictiveRisk) status = 'Riskli';
+              else if (rate < 0.9) status = 'Bozulmuş';
 
               return (
                 <div key={acq.id} className="acq-item">

@@ -40,4 +40,9 @@ export const askAgent            = (q) => api.post('/api/agent/ask', { question:
 export const triggerAcquirerFault = () => api.post('/api/agent/trigger/acquirer-fault').then((r) => r.data);
 export const triggerMerchantFault = () => api.post('/api/agent/trigger/merchant-fault').then((r) => r.data);
 
+export const getTrafficStatus       = () => api.get('/api/admin/traffic/status').then((r) => r.data);
+export const toggleTraffic          = (action) => api.post('/api/admin/traffic/toggle', { action }).then((r) => r.data);
+export const toggleAcquirer         = (id, action) => api.post(`/api/admin/acquirers/${id}/toggle`, { action }).then(r => r.data);
+export const updateAcquirerSettings = (id, routingWeight) => api.post(`/api/admin/acquirers/${id}/settings`, { routingWeight }).then(r => r.data);
+
 export default api;

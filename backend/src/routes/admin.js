@@ -35,4 +35,39 @@ router.get('/logs', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+const trafficSimulator = require('../services/trafficSimulator');
+
+router.post('/traffic/toggle', authMiddleware, (req, res) => {
+  const { action } = req.body;
+  if (action === 'start') {
+    trafficSimulator.start();
+  } else if (action === 'stop') {
+    trafficSimulator.stop();
+  }
+  res.json({ success: true, isRunning: trafficSimulator.isRunning() });
+});
+
+router.get('/traffic/status', authMiddleware, (req, res) => {
+  res.json({ isRunning: trafficSimulator.isRunning() });
+});
+
+const { isolateAcquirer, restoreAcquirer, updateRoutingWeight } = require('../services/acquirerSimulator');
+
+router.post('/acquirers/:id/toggle', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { action } = req.body;
+  if (action === 'isolate') await isolateAcquirer(id, 'Admin manual isolation');
+  else await restoreAcquirer(id);
+  res.json({ success: true });
+});
+
+router.post('/acquirers/:id/settings', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { routingWeight } = req.body;
+  if (routingWeight !== undefined) {
+    await updateRoutingWeight(id, parseFloat(routingWeight));
+  }
+  res.json({ success: true });
+});
+
 module.exports = router;

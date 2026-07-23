@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { getTrafficStatus, toggleTraffic } from '../services/api';
 
 const NAV = [
   {
     path: '/',
-    label: 'Dashboard',
+    label: 'Ana Panel',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
         <rect x="3" y="3" width="7" height="7" rx="1.5"/>
@@ -16,7 +17,7 @@ const NAV = [
   },
   {
     path: '/acquirers',
-    label: 'Acquirers',
+    label: 'Sağlayıcılar',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
         <path d="M2 9h20M2 15h20M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/>
@@ -59,6 +60,20 @@ const NAV = [
 export default function Sidebar({ wsConnected }) {
   const nav      = useNavigate();
   const location = useLocation();
+  const [trafficRunning, setTrafficRunning] = useState(true);
+
+  useEffect(() => {
+    getTrafficStatus().then(r => setTrafficRunning(r.isRunning)).catch(() => {});
+  }, []);
+
+  async function handleToggleTraffic() {
+    try {
+      const res = await toggleTraffic(trafficRunning ? 'stop' : 'start');
+      setTrafficRunning(res.isRunning);
+    } catch (err) {
+      console.error(err);
+    }
+  }
 
   function logout() {
     localStorage.removeItem('token');
@@ -91,6 +106,14 @@ export default function Sidebar({ wsConnected }) {
       </nav>
 
       <div className="sidebar-footer">
+        <button
+          className="logout-btn"
+          style={{ marginBottom: 12, justifyContent: 'center', backgroundColor: trafficRunning ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)', color: trafficRunning ? '#ef4444' : '#10b981', border: `1px solid ${trafficRunning ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)'}` }}
+          onClick={handleToggleTraffic}
+        >
+          {trafficRunning ? '⏸ Trafiği Durdur' : '▶️ Trafiği Başlat'}
+        </button>
+        
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10, fontSize: '0.75rem', color: 'var(--muted)' }}>
           <span className={`ws-dot ${wsConnected ? 'connected' : 'disconnected'}`} />
           {wsConnected ? 'Bağlı' : 'Bağlantı yok'}
