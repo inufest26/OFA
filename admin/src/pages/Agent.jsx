@@ -26,8 +26,64 @@ const TOOL_LABELS = {
   isolate_acquirer:          '⛔ Acquirer izole ediliyor...',
   restore_acquirer:          '✅ Acquirer geri yükleniyor...',
   create_incident_report:    '📋 Incident raporu oluşturuluyor...',
-  escalate_to_admin:         '🚨 Admin\u2019e escalate ediliyor...',
+  escalate_to_admin:         '🚨 Admin\'e escalate ediliyor...',
 };
+
+// Simülasyon: OFA'nın geçmişte çözdüğü örnek vakalar
+const SAMPLE_RESOLVED = [
+  {
+    id: 'sim-001',
+    time: '09:14',
+    severity: 'critical',
+    acquirer: 'Yapı Kredi Sanal POS',
+    title: 'Yapı Kredi — ACQUIRER_TIMEOUT oranı kritik eşiği aştı',
+    rootCause: 'Yapı Kredi POS altyapısında ağ katmanı kaynaklı geçici bir kesinti. 5 dakikada 312 TIMEOUT hatası tetiklendi.',
+    steps: [
+      { icon: '🚨', text: 'Hata oranı %78\'e ulaştı — anomali eşiği aşıldı' },
+      { icon: '📊', text: 'Son 300 transaction\'ın %74\'ü ACQUIRER_TIMEOUT ile sonuçlandı' },
+      { icon: '⚙️', text: 'Routing ağırlığı güncellendi: YapıKredi %5 → Garanti %60' },
+      { icon: '⛔', text: 'Yapı Kredi altyapısı izole moduna alındı' },
+      { icon: '✅', text: 'Başarı oranı %78 → %96\'ya yükseldi, 847 işlem kurtarıldı' },
+    ],
+    saving: '₺124.800 işlem hacmi korundu',
+    duration: '2dk 14sn',
+  },
+  {
+    id: 'sim-002',
+    time: '11:52',
+    severity: 'high',
+    acquirer: 'Akbank Sanal POS',
+    title: 'Akbank — Yüksek gecikme + INSUFFICIENT_FUNDS anomalisi',
+    rootCause: 'Akbank sisteminde anlık yük artışı. Ortalama yanıt süresi 3.200ms\'e çıktı; bazı işlemler hatalı INSUFFICIENT_FUNDS kodu döndürdü.',
+    steps: [
+      { icon: '📈', text: 'Avg response time 3.200ms — normal seviyenin 8x\'i' },
+      { icon: '🧠', text: 'ML skoru: Akbank 0.12 → İş Bankası 0.81 (en iyi rota)' },
+      { icon: '⚙️', text: 'Anlık trafik İş Bankası\'na kaydırıldı (%70 ağırlık)' },
+      { icon: '📋', text: 'Incident raporu oluşturuldu, Akbank ekibine bildirim gönderildi' },
+      { icon: '✅', text: 'Akbank 8 dakika sonra normale döndü, ağırlıklar dengelendi' },
+    ],
+    saving: '₺67.200 işlem hacmi korundu',
+    duration: '8dk 03sn',
+  },
+  {
+    id: 'sim-003',
+    time: '14:37',
+    severity: 'medium',
+    acquirer: 'QNB Finansbank Sanal POS',
+    title: 'QNB — Gece bakımı sonrası sertifika hatası',
+    rootCause: 'QNB POS sisteminde planlı bakım sonrası TLS sertifika yenilenmedi. İşlemler SSL handshake hatası ile reddedildi.',
+    steps: [
+      { icon: '🔍', text: 'SSL hatası tespit edildi — 43 işlem art arda reddedildi' },
+      { icon: '📊', text: 'Hata kodu analizi: %100 ACQUIRER_ERROR (SSL bağlantı katmanı)' },
+      { icon: '⚙️', text: 'QNB\'nin routing payı %3\'e düşürüldü (sadece TROY kartlar)' },
+      { icon: '🚨', text: 'QNB teknik ekibine otomatik uyarı gönderildi' },
+      { icon: '✅', text: 'QNB 22 dakika içinde sertifikayı yeniledi, sistem normale döndü' },
+    ],
+    saving: '₺18.400 işlem hacmi korundu',
+    duration: '22dk 41sn',
+  },
+];
+
 
 export default function Agent() {
   const [incidents, setIncidents] = useState([]);
@@ -37,6 +93,7 @@ export default function Agent() {
   const [chat, setChat] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [selectedSample, setSelectedSample] = useState(null);
   const chatRef = useRef(null);
   const reasoningRef = useRef(null);
   const activeIncidentRef = useRef(null);
@@ -222,7 +279,27 @@ export default function Agent() {
               </div>
             </div>
           ))}
-          {incidents.length === 0 && <div className="empty-state">Hiç olay yok</div>}
+          {incidents.length === 0 && <div className="empty-state" style={{ marginBottom: 8 }}>Henüz gerçek zamanlı olay yok</div>}
+
+          {/* Simülasyon vakaları */}
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+            <div style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>OFA Geçmiş Çözümler (Demo)</div>
+            {SAMPLE_RESOLVED.map((s) => (
+              <div
+                key={s.id}
+                className={`incident-item ${selectedSample?.id === s.id ? 'active' : ''}`}
+                onClick={() => { setSelectedSample(s); setActiveIncident(null); }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <div className="incident-item-title" style={{ fontSize: '0.8rem' }}>{s.title}</div>
+                  <div style={{ fontSize: '1rem', lineHeight: 1 }}>✅</div>
+                </div>
+                <div className="incident-item-meta">
+                  {s.acquirer} • Bugün {s.time} • {s.duration}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
         {/* Right column: Details OR Chat */}
@@ -288,6 +365,46 @@ export default function Agent() {
                     {step.type === 'conclusion' && <div style={{ marginTop: 6, lineHeight: 1.6 }}>{step.text}</div>}
                   </div>
                 ))}
+              </div>
+            </div>
+          ) : selectedSample ? (
+            /* Sample incident detail */
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+              <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)' }}>
+                <button className="btn btn-ghost" style={{ padding: '8px 12px', fontSize: '0.85rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: '6px', cursor: 'pointer' }} onClick={() => setSelectedSample(null)}>
+                  ← Listeye Dön
+                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  <span style={{
+                    fontSize: '0.7rem', fontWeight: 700, padding: '3px 8px', borderRadius: 4,
+                    background: selectedSample.severity === 'critical' ? 'rgba(239,68,68,0.15)' : selectedSample.severity === 'high' ? 'rgba(245,158,11,0.15)' : 'rgba(59,130,246,0.15)',
+                    color: selectedSample.severity === 'critical' ? '#ef4444' : selectedSample.severity === 'high' ? '#f59e0b' : '#3b82f6',
+                    textTransform: 'uppercase',
+                  }}>{selectedSample.severity}</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>OFA tarafından otonom olarak çözüldü • Bugün {selectedSample.time}</span>
+                </div>
+                <h2 style={{ fontSize: '1.1rem' }}>{selectedSample.title}</h2>
+              </div>
+              <div className="reasoning-scroll">
+                <div className="section-title">Kök Neden</div>
+                <div style={{ fontSize: '0.85rem', lineHeight: 1.6, marginBottom: 20, color: 'var(--muted)' }}>{selectedSample.rootCause}</div>
+
+                <div className="section-title">OFA Aksiyon Adımları</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+                  {selectedSample.steps.map((step, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '10px 12px', background: 'var(--surface2)', borderRadius: 6, borderLeft: `3px solid ${i === selectedSample.steps.length - 1 ? '#10b981' : 'var(--border2)'}` }}>
+                      <span style={{ fontSize: '1rem', flexShrink: 0 }}>{step.icon}</span>
+                      <span style={{ fontSize: '0.83rem', color: 'var(--text)', lineHeight: 1.5 }}>{step.text}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ padding: '14px 16px', background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 8 }}>
+                  <div style={{ fontSize: '0.8rem', color: '#10b981', fontWeight: 700, marginBottom: 4 }}>✅ Sonuç</div>
+                  <div style={{ fontSize: '0.82rem', color: 'var(--muted)', lineHeight: 1.6 }}>
+                    Müdahale süresi: <strong style={{ color: 'var(--text)' }}>{selectedSample.duration}</strong> &nbsp;•&nbsp; {selectedSample.saving}
+                  </div>
+                </div>
               </div>
             </div>
           ) : (

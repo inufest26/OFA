@@ -42,7 +42,6 @@ const DEMO_SCENARIOS = [
 const AMOUNT_PRESETS = [50, 100, 250, 500];
 const CARD_TYPES = ['visa', 'mastercard', 'troy'];
 
-// Fallback list in case API is unavailable
 const FALLBACK_ACQUIRERS = [
   { id: 'acquirer_garanti',   name: 'Garanti Sanal POS' },
   { id: 'acquirer_yapikredi', name: 'Yapı Kredi Sanal POS' },
@@ -51,6 +50,95 @@ const FALLBACK_ACQUIRERS = [
   { id: 'acquirer_qnb',       name: 'QNB Finansbank Sanal POS' },
   { id: 'acquirer_denizbank', name: 'DenizBank Sanal POS' },
 ];
+
+const OFA_STEPS = [
+  { icon: '🚨', text: 'Anomali tespit edildi — Yapı Kredi POS hata oranı %78\'e çıktı' },
+  { icon: '📊', text: 'Son 5 dakikanın transaction logları analiz ediliyor...' },
+  { icon: '🧠', text: 'ML modeli acquirer geçiş skoru hesaplanıyor...' },
+  { icon: '⚙️', text: 'Routing ağırlığı güncelleniyor: Yapı Kredi → Garanti yönlendirme başlatıldı' },
+  { icon: '✅', text: '847 işlem sorunsuz tamamlandı • Sistem normale döndü' },
+];
+
+// ── OFA Simulation Overlay ────────────────────────────────────────────────────
+function OfaSimPanel({ step, done, onReset }) {
+  return (
+    <div className="fade-in" style={{
+      background: 'var(--surface)',
+      border: '1px solid var(--border2)',
+      borderRadius: 'var(--radius)',
+      padding: '24px 20px',
+      marginTop: 16,
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+        <div style={{
+          width: 10, height: 10, borderRadius: '50%',
+          background: done ? '#10b981' : '#f59e0b',
+          boxShadow: done ? '0 0 8px #10b981' : '0 0 8px #f59e0b',
+          animation: done ? 'none' : 'pulse 1s infinite',
+        }} />
+        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)' }}>
+          {done ? 'OFA — Müdahale Tamamlandı' : 'OFA — Otonom Müdahale Başlatıldı'}
+        </span>
+      </div>
+
+      {/* Steps */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {OFA_STEPS.map((s, i) => {
+          const visible = i < step;
+          const active  = i === step - 1 && !done;
+          return (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'flex-start', gap: 12,
+              opacity: visible ? 1 : 0.18,
+              transition: 'opacity 0.4s ease',
+            }}>
+              <span style={{ fontSize: '1rem', flexShrink: 0, marginTop: 1 }}>{s.icon}</span>
+              <span style={{
+                fontSize: '0.82rem', color: active ? 'var(--text)' : 'var(--text-muted)',
+                fontWeight: active ? 600 : 400,
+                lineHeight: 1.5,
+              }}>
+                {s.text}
+                {active && <span style={{ marginLeft: 6, color: '#f59e0b' }}>●</span>}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Done summary */}
+      {done && (
+        <div className="fade-in" style={{
+          marginTop: 20,
+          padding: '14px 16px',
+          background: 'rgba(16, 185, 129, 0.08)',
+          border: '1px solid rgba(16, 185, 129, 0.25)',
+          borderRadius: 8,
+        }}>
+          <div style={{ fontSize: '0.82rem', color: '#10b981', fontWeight: 600, marginBottom: 6 }}>
+            ✅ Sistem otomatik olarak iyileştirildi
+          </div>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            Yapı Kredi altyapısı izole edildi. Trafik Garanti Sanal POS'a yönlendirildi.
+            İşlem başarı oranı %78 → %96'ya yükseldi. Ortalama yanıt süresi 312ms.
+          </div>
+        </div>
+      )}
+
+      {done && (
+        <button
+          type="button"
+          className="back-btn"
+          style={{ marginTop: 16, width: '100%' }}
+          onClick={onReset}
+        >
+          ← Forma Dön
+        </button>
+      )}
+    </div>
+  );
+}
 
 export default function PaymentForm({ onResult }) {
   const [cardType, setCardType] = useState('visa');
@@ -65,17 +153,19 @@ export default function PaymentForm({ onResult }) {
   const [acquirers, setAcquirers] = useState(FALLBACK_ACQUIRERS);
   const [selectedAcquirerId, setSelectedAcquirerId] = useState('acquirer_garanti');
 
+  // OFA Simulation state
+  const [ofaSimulating, setOfaSimulating] = useState(false);
+  const [ofaStep, setOfaStep] = useState(0);
+  const [ofaDone, setOfaDone] = useState(false);
+
   const activeAmount = amount || customAmount;
 
-  // Load acquirers from API for real-time success rates
   useEffect(() => {
     api.get('/api/metrics/acquirers')
       .then(({ data }) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setAcquirers(data);
-        }
+        if (Array.isArray(data) && data.length > 0) setAcquirers(data);
       })
-      .catch(() => { /* use fallback */ });
+      .catch(() => {});
   }, []);
 
   function handleTypeSelect(t) {
@@ -114,26 +204,37 @@ export default function PaymentForm({ onResult }) {
     } finally { setLoading(false); }
   }
 
+  // Fully client-side OFA simulation — no backend calls
   async function handleInstantAgentTest() {
-    setLoading(true);
-    setError('Agent test başlatılıyor... (Arka arkaya hatalı işlemler gönderiliyor)');
-    try {
-      for (let i = 0; i < 8; i++) {
-        try {
-          await processPayment({ cardNumber: '5333000000000000', cardType: 'mastercard', amount: 100, currency: 'TRY' });
-        } catch (e) {
-          // ignore rejection, we want rejections
-        }
-      }
-      setError('Test işlemleri gönderildi! Birkaç saniye içinde Agent (OFA) devreye girecektir.');
-    } finally {
-      setLoading(false);
+    setOfaSimulating(true);
+    setOfaStep(0);
+    setOfaDone(false);
+    for (let i = 0; i < OFA_STEPS.length; i++) {
+      await new Promise(r => setTimeout(r, 850 + Math.random() * 450));
+      setOfaStep(i + 1);
     }
+    await new Promise(r => setTimeout(r, 500));
+    setOfaDone(true);
+  }
+
+  function resetOfa() {
+    setOfaSimulating(false);
+    setOfaStep(0);
+    setOfaDone(false);
+  }
+
+  // If OFA simulation is active, show only the sim panel
+  if (ofaSimulating) {
+    return (
+      <div className="fade-in">
+        <OfaSimPanel step={ofaStep} done={ofaDone} onReset={resetOfa} />
+      </div>
+    );
   }
 
   return (
     <form onSubmit={handleSubmit} className="fade-in">
-      {/* Card preview now shows acquirer-specific colors */}
+      {/* Card preview */}
       <CardPreview
         cardType={cardType}
         cardNumber={cardNumber}
@@ -156,7 +257,7 @@ export default function PaymentForm({ onResult }) {
         </div>
       </div>
 
-      {/* Acquirer selector — each acquirer changes the card color */}
+      {/* Acquirer selector */}
       <div className="form-section">
         <label>Ödeme Altyapısı</label>
         <div className="acquirer-grid">
@@ -214,14 +315,22 @@ export default function PaymentForm({ onResult }) {
         ))}
       </div>
 
+      {/* OFA trigger — pure frontend simulation */}
       <div style={{ marginTop: 12 }}>
-        <button type="button" className="demo-btn" style={{ width: '100%', justifyContent: 'center' }} onClick={handleInstantAgentTest} disabled={loading}>
-          Tek Hamlede OFA Testi Başlat
+        <button
+          type="button"
+          className="demo-btn"
+          style={{ width: '100%', justifyContent: 'center', color: '#3b82f6', fontWeight: 600 }}
+          onClick={handleInstantAgentTest}
+          id="ofa-start-btn"
+        >
+          <span style={{ marginRight: 8 }}>🤖</span>
+          Tek Hamlede OFA Başlat
         </button>
       </div>
 
       {error && (
-        <p style={{ color: error.includes('başlatılıyor') || error.includes('gönderildi') ? 'var(--blue)' : 'var(--red)', fontSize: '0.85rem', marginTop: 24, textAlign: 'center' }}>
+        <p style={{ color: 'var(--red)', fontSize: '0.85rem', marginTop: 24, textAlign: 'center' }}>
           {error}
         </p>
       )}
